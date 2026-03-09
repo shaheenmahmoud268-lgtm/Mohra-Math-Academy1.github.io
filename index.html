@@ -5,27 +5,150 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>MOHRA – Math Academy</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet"/>
-<script type="module">
+<script>
 // ═══════════════════════════════════════════════
-//  FIREBASE CONFIG
+//  FIREBASE REST API — no SDK, no CDN needed
 // ═══════════════════════════════════════════════
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, onAuthStateChanged, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+const FB_API_KEY  = "AIzaSyBSIdDJt4H-hFtBerkIYmRthovdr6v5MAc";
+const FB_PROJECT  = "mohra-math-academy";
+const FB_AUTH_URL = "https://identitytoolkit.googleapis.com/v1/accounts";
+const FB_DB_URL   = "https://firestore.googleapis.com/v1/projects/" + FB_PROJECT + "/databases/(default)/documents";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBSIdDJt4H-hFtBerkIYmRthovdr6v5MAc",
-  authDomain: "mohra-math-academy.firebaseapp.com",
-  projectId: "mohra-math-academy",
-  storageBucket: "mohra-math-academy.firebasestorage.app",
-  messagingSenderId: "1055265825472",
-  appId: "1:1055265825472:web:d7e692e33e517a9b69c325"
+var fbIdToken = null;
+var fbUserId  = null;
+var fbRefreshToken = null;
+
+// ── Firestore value helpers ──────────────────────
+function toFsValue(val) {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+  if (typeof val === 'string') return { stringValue: val };
+  if (Array.isArray(val)) return { arrayValue: { values: val.map(toFsValue) } };
+  if (typeof val === 'object') {
+    const fields = {};
+    for (const k in val) fields[k] = toFsValue(val[k]);
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+function fromFsValue(v) {
+  if (!v) return null;
+  if ('nullValue'     in v) return null;
+  if ('booleanValue'  in v) return v.booleanValue;
+  if ('integerValue'  in v) return Number(v.integerValue);
+  if ('doubleValue'   in v) return v.doubleValue;
+  if ('stringValue'   in v) return v.stringValue;
+  if ('arrayValue'    in v) return (v.arrayValue.values||[]).map(fromFsValue);
+  if ('mapValue'      in v) return fromFsDoc({ fields: v.mapValue.fields||{} });
+  return null;
+}
+
+function fromFsDoc(doc) {
+  if (!doc || !doc.fields) return {};
+  const out = {};
+  for (const k in doc.fields) out[k] = fromFsValue(doc.fields[k]);
+  return out;
+}
+
+function toFsDoc(obj) {
+  const fields = {};
+  for (const k in obj) fields[k] = toFsValue(obj[k]);
+  return { fields };
+}
+
+// ── Firestore REST calls ────────────────────────
+async function fsGet(col, id) {
+  const res = await fetch(FB_DB_URL + '/' + col + '/' + id, {
+    headers: fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}
+  });
+  if (!res.ok) return null;
+  const doc = await res.json();
+  return fromFsDoc(doc);
+}
+
+async function fsSet(col, id, data) {
+  const body = JSON.stringify(toFsDoc(data));
+  const res = await fetch(FB_DB_URL + '/' + col + '/' + id + '?currentDocument.exists=false', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}) }, body
+  });
+  if (!res.ok) {
+    // Document exists, use PATCH
+    const res2 = await fetch(FB_DB_URL + '/' + col + '/' + id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}) }, body
+    });
+    return res2.ok;
+  }
+  return true;
+}
+
+async function fsDelete(col, id) {
+  await fetch(FB_DB_URL + '/' + col + '/' + id, {
+    method: 'DELETE', headers: fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}
+  });
+}
+
+async function fsList(col) {
+  const res = await fetch(FB_DB_URL + '/' + col + '?pageSize=500', {
+    headers: fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}
+  });
+  if (!res.ok) return [];
+  const json = await res.json();
+  return (json.documents || []).map(d => {
+    const obj = fromFsDoc(d);
+    if (!obj.id) obj.id = d.name.split('/').pop();
+    return obj;
+  });
+}
+
+// ── Firebase helpers exposed to app ─────────────
+window._fbSaveDoc = async function(col, id, data) {
+  try { await fsSet(col, String(id), data); }
+  catch(e) { console.error('Save error', e); toast && toast('Save failed.', 'error'); }
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+window._fbDeleteDoc = async function(col, id) {
+  try { await fsDelete(col, String(id)); }
+  catch(e) { console.error('Delete error', e); }
+};
 
+window._fbSaveNextId = async function() {
+  try { await fsSet('meta', 'counters', { nextId: state.nextId }); }
+  catch(e) {}
+};
+
+async function loadAllData() {
+  const cols = ['users','materials','recordings','announcements','classrooms','homework','grades','questions','notes','schedule'];
+  for (const col of cols) {
+    try { state[col] = await fsList(col); }
+    catch(e) { state[col] = state[col] || []; }
+  }
+  state.announcements.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
+  try {
+    const meta = await fsGet('meta', 'counters');
+    if (meta && meta.nextId) state.nextId = meta.nextId;
+  } catch(e) {}
+}
+
+window._fbLoadAllData = loadAllData;
+
+// ── Token refresh ────────────────────────────────
+async function refreshToken() {
+  if (!fbRefreshToken) return false;
+  try {
+    const res = await fetch('https://securetoken.googleapis.com/v1/token?key=' + FB_API_KEY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: fbRefreshToken })
+    });
+    const data = await res.json();
+    if (data.id_token) { fbIdToken = data.id_token; fbRefreshToken = data.refresh_token; return true; }
+  } catch(e) {}
+  return false;
+}
+
+// ── Auth helpers ─────────────────────────────────
 function showAuthScreen() {
   const as = document.getElementById('auth-screen');
   const ma = document.getElementById('main-app');
@@ -36,7 +159,7 @@ function showAuthScreen() {
 
 function showLoginError(msg) {
   const err = document.getElementById('login-error');
-  if (err) { err.textContent = msg; err.style.display = 'block'; err.style.color = ''; err.style.background = ''; }
+  if (err) { err.textContent = msg; err.style.display = 'block'; err.style.color = ''; err.style.background = ''; err.style.borderColor = ''; }
 }
 
 function setAuthLoading(on) {
@@ -44,169 +167,174 @@ function setAuthLoading(on) {
   if (btn) { btn.disabled = on; btn.textContent = on ? 'Signing in...' : 'Sign In →'; }
 }
 
-async function loadAllData() {
-  const cols = ['users','materials','recordings','announcements','classrooms','homework','grades','questions','notes','schedule'];
-  for (const col of cols) {
-    try {
-      const snap = await getDocs(collection(db, col));
-      state[col] = snap.docs.map(d => ({ ...d.data(), id: d.data().id !== undefined ? d.data().id : d.id }));
-    } catch(e) { state[col] = state[col] || []; }
-  }
-  state.announcements.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
-  try {
-    const metaDoc = await getDoc(doc(db, 'meta', 'counters'));
-    if (metaDoc.exists()) state.nextId = metaDoc.data().nextId || 100;
-  } catch(e) {}
+function saveSession(uid, idToken, refreshTok) {
+  try { localStorage.setItem('mohra_session', JSON.stringify({ uid, idToken, refreshTok })); } catch(e) {}
 }
 
-onAuthStateChanged(auth, async (firebaseUser) => {
-  if (firebaseUser) {
-    try {
-      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        if (userData.status === 'banned') {
-          await signOut(auth);
-          showAuthScreen();
-          showLoginError('Your account has been banned.');
-          return;
-        }
-        await loadAllData();
-        window._fbCurrentUID = firebaseUser.uid;
-        loginAs({ ...userData, uid: firebaseUser.uid, id: firebaseUser.uid });
-      } else {
-        await signOut(auth);
-        showAuthScreen();
-        showLoginError('Account not found. Please contact the admin.');
+function clearSession() {
+  try { localStorage.removeItem('mohra_session'); } catch(e) {}
+}
+
+async function restoreSession() {
+  try {
+    const s = localStorage.getItem('mohra_session');
+    if (!s) return false;
+    const { uid, idToken, refreshTok } = JSON.parse(s);
+    fbIdToken = idToken; fbRefreshToken = refreshTok; fbUserId = uid;
+    const ok = await refreshToken();
+    if (!ok) { clearSession(); return false; }
+    const userData = await fsGet('users', uid);
+    if (!userData || userData.status === 'banned') { clearSession(); return false; }
+    await loadAllData();
+    loginAs({ ...userData, uid, id: uid });
+    return true;
+  } catch(e) { clearSession(); return false; }
+}
+
+async function ensureFounderExists() {
+  try {
+    const users = await fsList('users');
+    if (users.some(u => u.role === 'founder')) return;
+    // Create founder via Auth REST
+    const res = await fetch(FB_AUTH_URL + ':signUp?key=' + FB_API_KEY, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'hazemmohra986@gmail.com', password: 'mohra2026', returnSecureToken: true })
+    });
+    const data = await res.json();
+    if (data.error) {
+      // Account exists, sign in to get UID
+      const res2 = await fetch(FB_AUTH_URL + ':signInWithPassword?key=' + FB_API_KEY, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'hazemmohra986@gmail.com', password: 'mohra2026', returnSecureToken: true })
+      });
+      const data2 = await res2.json();
+      if (data2.idToken) {
+        fbIdToken = data2.idToken;
+        await fsSet('users', data2.localId, { id: data2.localId, uid: data2.localId, name: 'Mr. Hazem Mohra', email: 'hazemmohra986@gmail.com', role: 'founder', status: 'active', joined: new Date().toISOString().split('T')[0], classroomId: null });
+        await fsSet('meta', 'counters', { nextId: 100 });
+        await fsSet('announcements', 'ann_1', { id: 'ann_1', title: 'Welcome to MOHRA Academy!', body: 'Welcome all students to MOHRA Math Academy.', author: 'Mr. Hazem Mohra', date: new Date().toISOString() });
+        fbIdToken = null;
       }
-    } catch(e) {
-      console.error(e);
-      showAuthScreen();
+    } else if (data.idToken) {
+      fbIdToken = data.idToken;
+      await fsSet('users', data.localId, { id: data.localId, uid: data.localId, name: 'Mr. Hazem Mohra', email: 'hazemmohra986@gmail.com', role: 'founder', status: 'active', joined: new Date().toISOString().split('T')[0], classroomId: null });
+      await fsSet('meta', 'counters', { nextId: 100 });
+      await fsSet('announcements', 'ann_1', { id: 'ann_1', title: 'Welcome to MOHRA Academy!', body: 'Welcome all students to MOHRA Math Academy.', author: 'Mr. Hazem Mohra', date: new Date().toISOString() });
+      fbIdToken = null;
     }
-  } else {
-    showAuthScreen();
-  }
-});
+  } catch(e) { console.log('ensureFounderExists:', e); }
+}
 
-window._fbSaveDoc = async function(colName, id, data) {
-  try { await setDoc(doc(db, colName, String(id)), data); }
-  catch(e) { console.error('Save error:', e); toast('Save failed. Check your connection.', 'error'); }
-};
-
-window._fbDeleteDoc = async function(colName, id) {
-  try { await deleteDoc(doc(db, colName, String(id))); }
-  catch(e) { console.error('Delete error:', e); }
-};
-
-window._fbSaveNextId = async function() {
-  try { await setDoc(doc(db, 'meta', 'counters'), { nextId: state.nextId }); }
-  catch(e) {}
-};
-
-window._fbLoadAllData = loadAllData;
-
+// ── Auth functions ────────────────────────────────
 window.doFirebaseLogin = async function() {
   const email = document.getElementById('login-email').value.trim();
-  const pass = document.getElementById('login-pass').value;
-  const err = document.getElementById('login-error');
-  err.style.display = 'none';
+  const pass  = document.getElementById('login-pass').value;
+  document.getElementById('login-error').style.display = 'none';
   if (!email || !pass) { showLoginError('Please enter your email and password.'); return; }
   setAuthLoading(true);
   try {
-    await signInWithEmailAndPassword(auth, email, pass);
+    const res = await fetch(FB_AUTH_URL + ':signInWithPassword?key=' + FB_API_KEY, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass, returnSecureToken: true })
+    });
+    const data = await res.json();
+    if (data.error) {
+      setAuthLoading(false);
+      const code = data.error.message || '';
+      showLoginError(code.includes('INVALID') || code.includes('PASSWORD') || code.includes('EMAIL') ? 'Invalid email or password.' : code.includes('TOO_MANY') ? 'Too many attempts. Try again later.' : 'Login failed: ' + code);
+      return;
+    }
+    fbIdToken = data.idToken;
+    fbRefreshToken = data.refreshToken;
+    fbUserId = data.localId;
+    saveSession(fbUserId, fbIdToken, fbRefreshToken);
+    let userData = await fsGet('users', fbUserId);
+    // First-ever login for founder — create their Firestore profile automatically
+    if (!userData && email === 'hazemmohra986@gmail.com') {
+      userData = { id: fbUserId, uid: fbUserId, name: 'Mr. Hazem Mohra', email: 'hazemmohra986@gmail.com', role: 'founder', status: 'active', joined: new Date().toISOString().split('T')[0], classroomId: null };
+      await fsSet('users', fbUserId, userData);
+      await fsSet('meta', 'counters', { nextId: 100 });
+      await fsSet('announcements', 'ann_1', { id: 'ann_1', title: 'Welcome to MOHRA Academy!', body: 'Welcome all students to MOHRA Math Academy. Check the materials section for course resources.', author: 'Mr. Hazem Mohra', date: new Date().toISOString() });
+    }
+    if (!userData) { showLoginError('Account not found. Contact the admin.'); setAuthLoading(false); return; }
+    if (userData.status === 'banned') { clearSession(); showLoginError('Your account has been banned.'); setAuthLoading(false); return; }
+    await loadAllData();
+    loginAs({ ...userData, uid: fbUserId, id: fbUserId });
   } catch(e) {
     setAuthLoading(false);
-    const msg = ['auth/invalid-credential','auth/wrong-password','auth/user-not-found'].includes(e.code)
-      ? 'Invalid email or password.'
-      : e.code === 'auth/too-many-requests' ? 'Too many attempts. Try again later.'
-      : 'Login failed. Check your connection.';
-    showLoginError(msg);
+    showLoginError('Login failed. Check your internet connection.');
   }
 };
 
-window.doFirebaseLogout = async function() {
-  try { await signOut(auth); } catch(e) {}
+window.doFirebaseLogout = function() {
+  clearSession();
+  fbIdToken = null; fbRefreshToken = null; fbUserId = null;
   state.currentUser = null;
   document.getElementById('login-email').value = '';
   document.getElementById('login-pass').value = '';
+  showAuthScreen();
 };
 
 window.doForgotPassword = async function() {
   const email = document.getElementById('login-email').value.trim();
-  if (!email) { showLoginError('Enter your email first, then click Forgot Password.'); return; }
+  if (!email) { showLoginError('Enter your email first.'); return; }
   try {
-    await sendPasswordResetEmail(auth, email);
+    const res = await fetch(FB_AUTH_URL + ':sendOobCode?key=' + FB_API_KEY, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestType: 'PASSWORD_RESET', email })
+    });
+    const data = await res.json();
+    if (data.error) { showLoginError('Could not send reset email. Check the address.'); return; }
     const err = document.getElementById('login-error');
-    err.style.display = 'block';
-    err.style.color = '#2e7d32';
-    err.style.background = '#e8f5e9';
-    err.style.borderColor = '#a5d6a7';
-    err.textContent = '\u2705 Password reset email sent! Check your inbox.';
-  } catch(e) { showLoginError('Could not send reset email. Check the address.'); }
+    err.style.display = 'block'; err.style.color = '#2e7d32';
+    err.style.background = '#e8f5e9'; err.style.borderColor = '#a5d6a7';
+    err.textContent = '✅ Password reset email sent! Check your inbox.';
+  } catch(e) { showLoginError('Failed to send reset email.'); }
 };
 
 window.doCreateFirebaseAccount = async function() {
-  const name = document.getElementById('ca-name').value.trim();
-  const email = document.getElementById('ca-email').value.trim();
-  const password = document.getElementById('ca-password').value;
-  const role = document.getElementById('ca-role').value;
+  const name      = document.getElementById('ca-name').value.trim();
+  const email     = document.getElementById('ca-email').value.trim();
+  const password  = document.getElementById('ca-password').value;
+  const role      = document.getElementById('ca-role').value;
   const classroomId = document.getElementById('ca-classroom').value;
   const err = document.getElementById('ca-error');
   if (!name || !email || !password) { showErr(err, 'All fields required.'); return; }
   if (password.length < 6) { showErr(err, 'Password must be at least 6 characters.'); return; }
   try {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    const uid = cred.user.uid;
+    const res = await fetch(FB_AUTH_URL + ':signUp?key=' + FB_API_KEY, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true })
+    });
+    const data = await res.json();
+    if (data.error) {
+      const code = data.error.message || '';
+      showErr(err, code.includes('EMAIL_EXISTS') ? 'This email is already registered.' : code.includes('INVALID_EMAIL') ? 'Invalid email address.' : code.includes('WEAK_PASSWORD') ? 'Password too weak (min 6 chars).' : 'Error: ' + code);
+      return;
+    }
+    const uid = data.localId;
     const user = { id: uid, uid, name, email, role, status: 'active', joined: new Date().toISOString().split('T')[0], classroomId: classroomId || null };
     await window._fbSaveDoc('users', uid, user);
-    // Sign back in as current user (creating account signs in as new user)
     state.users.push(user);
     err.style.display = 'none';
-    ['ca-name','ca-email','ca-password'].forEach(id => document.getElementById(id).value = '');
+    ['ca-name','ca-email','ca-password'].forEach(i => document.getElementById(i).value = '');
     document.getElementById('ca-classroom').value = '';
     closeModal('modal-create-account');
     renderAdminTable(); renderDashboard();
-    toast('Account created for ' + name + '! \u2705', 'success');
-  } catch(e) {
-    const msg = e.code === 'auth/email-already-in-use' ? 'This email is already registered.'
-      : e.code === 'auth/invalid-email' ? 'Invalid email address.'
-      : e.code === 'auth/weak-password' ? 'Password must be at least 6 characters.'
-      : 'Failed to create account: ' + e.message;
-    showErr(err, msg);
-  }
+    toast('Account created for ' + name + '! ✅', 'success');
+  } catch(e) { showErr(err, 'Failed to create account. Check your connection.'); }
 };
 
-window.setupFounderAccount = async function() {
-  const email = document.getElementById('setup-email').value.trim();
-  const pass = document.getElementById('setup-pass').value;
-  const msg = document.getElementById('setup-msg');
-  msg.style.display = 'none';
-  if (!email || !pass) { msg.textContent = 'Please fill in both fields.'; msg.style.display='block'; return; }
-  if (pass.length < 6) { msg.textContent = 'Password must be at least 6 characters.'; msg.style.display='block'; return; }
-  try {
-    // Check if founder already exists in Firestore
-    const usersSnap = await getDocs(collection(db, 'users'));
-    const founderExists = usersSnap.docs.some(d => d.data().role === 'founder');
-    if (founderExists) { msg.textContent = 'Founder account already exists. Just sign in!'; msg.style.color='#2e7d32'; msg.style.display='block'; return; }
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    const uid = cred.user.uid;
-    const founderData = { id: uid, uid, name: 'Mr. Hazem Mohra', email, role: 'founder', status: 'active', joined: new Date().toISOString().split('T')[0], classroomId: null };
-    await setDoc(doc(db, 'users', uid), founderData);
-    await setDoc(doc(db, 'meta', 'counters'), { nextId: 100 });
-    // Add welcome announcement
-    await setDoc(doc(db, 'announcements', '1'), { id: 1, title: 'Welcome to MOHRA Academy!', body: 'Welcome all students to MOHRA Math Academy. Check the materials section for course resources.', author: 'founder', date: new Date().toISOString() });
-    msg.style.color = '#2e7d32';
-    msg.textContent = '\u2705 Founder account created! You are now signed in.';
-    msg.style.display = 'block';
-  } catch(e) {
-    const m = e.code === 'auth/email-already-in-use' ? 'This email already has an account. Just sign in!'
-      : e.code === 'auth/invalid-email' ? 'Invalid email address.'
-      : 'Error: ' + e.message;
-    msg.style.color = '#c62828';
-    msg.textContent = m;
-    msg.style.display = 'block';
-  }
-};
+// ── Boot ─────────────────────────────────────────
+window.addEventListener('load', async function() {
+  document.getElementById('auth-logo-img').src  = LOGO_B64;
+  document.getElementById('header-logo-img').src = LOGO_B64;
+  document.getElementById('hero-logo-img').src   = LOGO_B64;
+  buildParticles();
+  setAuthLoading(true);
+  const resumed = await restoreSession();
+  if (!resumed) showAuthScreen();
+});
 </script>
 <style>
 :root {
@@ -597,17 +725,7 @@ label[for="remember-me"]:hover { color:var(--navy); }
       <div style="text-align:center;margin-top:14px">
         <button onclick="doForgotPassword()" style="background:none;border:none;color:var(--sky);font-size:0.88rem;cursor:pointer;text-decoration:underline;font-family:inherit">Forgot password?</button>
       </div>
-      <div id="first-setup-area" style="margin-top:20px;padding:14px;background:#e8eaf6;border-radius:10px;text-align:center;display:none">
-        <div style="font-size:0.82rem;color:#3949ab;margin-bottom:10px;font-weight:600">⚙️ First Time Setup</div>
-        <div style="font-size:0.78rem;color:#5c6bc0;margin-bottom:10px">Create the founder admin account for Mr. Hazem Mohra</div>
-        <input type="email" id="setup-email" placeholder="Founder email (e.g. mohra@gmail.com)" style="width:100%;padding:10px 14px;border:2px solid #c5cae9;border-radius:8px;font-family:inherit;font-size:0.88rem;margin-bottom:8px;outline:none"/>
-        <input type="password" id="setup-pass" placeholder="Set founder password (min 6 chars)" style="width:100%;padding:10px 14px;border:2px solid #c5cae9;border-radius:8px;font-family:inherit;font-size:0.88rem;margin-bottom:10px;outline:none"/>
-        <button onclick="setupFounderAccount()" style="background:#1a237e;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:0.88rem;font-weight:600;width:100%">Create Founder Account →</button>
-        <div id="setup-msg" style="margin-top:8px;font-size:0.78rem;color:#c62828;display:none"></div>
-      </div>
-      <div style="text-align:center;margin-top:10px">
-        <button onclick="document.getElementById('first-setup-area').style.display=document.getElementById('first-setup-area').style.display==='none'?'block':'none'" style="background:none;border:none;color:#9fa8da;font-size:0.75rem;cursor:pointer;font-family:inherit">First time? Setup founder account</button>
-      </div>
+
     </div>
 
 
@@ -967,7 +1085,6 @@ label[for="remember-me"]:hover { color:var(--navy); }
       <select id="ca-role">
         <option value="student">🎓 Student</option>
         <option value="admin">🛡 Admin</option>
-        <option value="founder">👑 Founder</option>
       </select>
     </div>
     <div class="field"><label>Assign to Classroom <span style="font-weight:400;color:var(--subtext)">(optional)</span></label>
@@ -1145,19 +1262,7 @@ let state = {
 // ═══════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════
-window.onload = () => {
-  document.getElementById('auth-logo-img').src = LOGO_B64;
-  document.getElementById('header-logo-img').src = LOGO_B64;
-  document.getElementById('hero-logo-img').src = LOGO_B64;
-  buildParticles();
-  // Auth is handled by Firebase onAuthStateChanged listener
-  // Show loading state until Firebase resolves
-  document.getElementById('login-btn') && (document.getElementById('login-btn').textContent = 'Loading...');
-  setTimeout(() => {
-    const btn = document.getElementById('login-btn');
-    if (btn && btn.textContent === 'Loading...') btn.textContent = 'Sign In →';
-  }, 3000);
-};
+// window.onload handled by Firebase boot script above
 
 function togglePass(id, btn) {
   const input = document.getElementById(id);
@@ -1625,11 +1730,11 @@ function renderAdminTable() {
       <td style="font-size:0.82rem;color:var(--subtext)">${u.joined}</td>
       <td>
         <div class="actions-cell">
-          <select onchange="changeRole(${u.id},this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:7px;font-size:0.8rem;font-family:inherit;cursor:pointer;background:white;color:var(--text)">
+          ${cu.role==='founder' && u.role!=='founder' ? `
+          <select onchange="changeRole('${u.id}',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:7px;font-size:0.8rem;font-family:inherit;cursor:pointer;background:white;color:var(--text)">
             <option value="student" ${u.role==='student'?'selected':''}>🎓 Student</option>
             <option value="admin" ${u.role==='admin'?'selected':''}>🛡 Admin</option>
-            <option value="founder" ${u.role==='founder'?'selected':''}>👑 Founder</option>
-          </select>
+          </select>` : `<span class="role-badge role-${u.role}">${u.role}</span>`}
           <button class="btn btn-secondary btn-sm" onclick="openAssignClassroom(${u.id})" style="white-space:nowrap">🏫 ${cls ? esc(cls.name) : 'Assign Class'}</button>
           ${u.status==='active'
             ? `<button class="btn btn-danger btn-sm" onclick="banUser(${u.id})">🚫 Ban</button>`
@@ -1664,8 +1769,10 @@ function unbanUser(id) {
 }
 
 function changeRole(id, role) {
-  const u = state.users.find(x => x.id===id);
+  if (state.currentUser?.role !== 'founder') { toast('Only the founder can change roles.', 'error'); return; }
+  const u = state.users.find(x => x.id===id || x.uid===id);
   if (!u) return;
+  if (u.role === 'founder') { toast('The founder role cannot be changed.', 'error'); return; }
   u.role = role;
   window._fbSaveDoc && window._fbSaveDoc('users', u.uid||u.id, u);
   renderAdminTable();
@@ -1732,9 +1839,9 @@ function demoteUser(id) {
 }
 
 function deleteUser(id) {
-  const u = state.users.find(x => x.id===id);
-  if (!u || u.role==='founder') return;
-  if (!confirm(`Delete account "${u.username}"? This cannot be undone.`)) return;
+  const u = state.users.find(x => x.id===id || x.uid===id);
+  if (!u || u.role==='founder') { if(u?.role==='founder') toast('The founder account cannot be deleted.','error'); return; }
+  if (!confirm(`Delete account for "${u.name}"? This cannot be undone.`)) return;
   const _du = state.users.find(x=>x.id===id);
   state.users = state.users.filter(x => x.id!==id);
   if(_du) window._fbDeleteDoc&&window._fbDeleteDoc('users',_du.uid||_du.id);
@@ -2380,4 +2487,3 @@ function fileColor(type) {
 
 </body>
 </html>
-
