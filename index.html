@@ -5,6 +5,209 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>MOHRA – Math Academy</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet"/>
+<script type="module">
+// ═══════════════════════════════════════════════
+//  FIREBASE CONFIG
+// ═══════════════════════════════════════════════
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, onAuthStateChanged, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBSIdDJt4H-hFtBerkIYmRthovdr6v5MAc",
+  authDomain: "mohra-math-academy.firebaseapp.com",
+  projectId: "mohra-math-academy",
+  storageBucket: "mohra-math-academy.firebasestorage.app",
+  messagingSenderId: "1055265825472",
+  appId: "1:1055265825472:web:d7e692e33e517a9b69c325"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+function showAuthScreen() {
+  const as = document.getElementById('auth-screen');
+  const ma = document.getElementById('main-app');
+  if (as) as.style.display = 'flex';
+  if (ma) ma.style.display = 'none';
+  setAuthLoading(false);
+}
+
+function showLoginError(msg) {
+  const err = document.getElementById('login-error');
+  if (err) { err.textContent = msg; err.style.display = 'block'; err.style.color = ''; err.style.background = ''; }
+}
+
+function setAuthLoading(on) {
+  const btn = document.getElementById('login-btn');
+  if (btn) { btn.disabled = on; btn.textContent = on ? 'Signing in...' : 'Sign In →'; }
+}
+
+async function loadAllData() {
+  const cols = ['users','materials','recordings','announcements','classrooms','homework','grades','questions','notes','schedule'];
+  for (const col of cols) {
+    try {
+      const snap = await getDocs(collection(db, col));
+      state[col] = snap.docs.map(d => ({ ...d.data(), id: d.data().id !== undefined ? d.data().id : d.id }));
+    } catch(e) { state[col] = state[col] || []; }
+  }
+  state.announcements.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
+  try {
+    const metaDoc = await getDoc(doc(db, 'meta', 'counters'));
+    if (metaDoc.exists()) state.nextId = metaDoc.data().nextId || 100;
+  } catch(e) {}
+}
+
+onAuthStateChanged(auth, async (firebaseUser) => {
+  if (firebaseUser) {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        if (userData.status === 'banned') {
+          await signOut(auth);
+          showAuthScreen();
+          showLoginError('Your account has been banned.');
+          return;
+        }
+        await loadAllData();
+        window._fbCurrentUID = firebaseUser.uid;
+        loginAs({ ...userData, uid: firebaseUser.uid, id: firebaseUser.uid });
+      } else {
+        await signOut(auth);
+        showAuthScreen();
+        showLoginError('Account not found. Please contact the admin.');
+      }
+    } catch(e) {
+      console.error(e);
+      showAuthScreen();
+    }
+  } else {
+    showAuthScreen();
+  }
+});
+
+window._fbSaveDoc = async function(colName, id, data) {
+  try { await setDoc(doc(db, colName, String(id)), data); }
+  catch(e) { console.error('Save error:', e); toast('Save failed. Check your connection.', 'error'); }
+};
+
+window._fbDeleteDoc = async function(colName, id) {
+  try { await deleteDoc(doc(db, colName, String(id))); }
+  catch(e) { console.error('Delete error:', e); }
+};
+
+window._fbSaveNextId = async function() {
+  try { await setDoc(doc(db, 'meta', 'counters'), { nextId: state.nextId }); }
+  catch(e) {}
+};
+
+window._fbLoadAllData = loadAllData;
+
+window.doFirebaseLogin = async function() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  const err = document.getElementById('login-error');
+  err.style.display = 'none';
+  if (!email || !pass) { showLoginError('Please enter your email and password.'); return; }
+  setAuthLoading(true);
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+  } catch(e) {
+    setAuthLoading(false);
+    const msg = ['auth/invalid-credential','auth/wrong-password','auth/user-not-found'].includes(e.code)
+      ? 'Invalid email or password.'
+      : e.code === 'auth/too-many-requests' ? 'Too many attempts. Try again later.'
+      : 'Login failed. Check your connection.';
+    showLoginError(msg);
+  }
+};
+
+window.doFirebaseLogout = async function() {
+  try { await signOut(auth); } catch(e) {}
+  state.currentUser = null;
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-pass').value = '';
+};
+
+window.doForgotPassword = async function() {
+  const email = document.getElementById('login-email').value.trim();
+  if (!email) { showLoginError('Enter your email first, then click Forgot Password.'); return; }
+  try {
+    await sendPasswordResetEmail(auth, email);
+    const err = document.getElementById('login-error');
+    err.style.display = 'block';
+    err.style.color = '#2e7d32';
+    err.style.background = '#e8f5e9';
+    err.style.borderColor = '#a5d6a7';
+    err.textContent = '\u2705 Password reset email sent! Check your inbox.';
+  } catch(e) { showLoginError('Could not send reset email. Check the address.'); }
+};
+
+window.doCreateFirebaseAccount = async function() {
+  const name = document.getElementById('ca-name').value.trim();
+  const email = document.getElementById('ca-email').value.trim();
+  const password = document.getElementById('ca-password').value;
+  const role = document.getElementById('ca-role').value;
+  const classroomId = document.getElementById('ca-classroom').value;
+  const err = document.getElementById('ca-error');
+  if (!name || !email || !password) { showErr(err, 'All fields required.'); return; }
+  if (password.length < 6) { showErr(err, 'Password must be at least 6 characters.'); return; }
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    const uid = cred.user.uid;
+    const user = { id: uid, uid, name, email, role, status: 'active', joined: new Date().toISOString().split('T')[0], classroomId: classroomId || null };
+    await window._fbSaveDoc('users', uid, user);
+    // Sign back in as current user (creating account signs in as new user)
+    state.users.push(user);
+    err.style.display = 'none';
+    ['ca-name','ca-email','ca-password'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('ca-classroom').value = '';
+    closeModal('modal-create-account');
+    renderAdminTable(); renderDashboard();
+    toast('Account created for ' + name + '! \u2705', 'success');
+  } catch(e) {
+    const msg = e.code === 'auth/email-already-in-use' ? 'This email is already registered.'
+      : e.code === 'auth/invalid-email' ? 'Invalid email address.'
+      : e.code === 'auth/weak-password' ? 'Password must be at least 6 characters.'
+      : 'Failed to create account: ' + e.message;
+    showErr(err, msg);
+  }
+};
+
+window.setupFounderAccount = async function() {
+  const email = document.getElementById('setup-email').value.trim();
+  const pass = document.getElementById('setup-pass').value;
+  const msg = document.getElementById('setup-msg');
+  msg.style.display = 'none';
+  if (!email || !pass) { msg.textContent = 'Please fill in both fields.'; msg.style.display='block'; return; }
+  if (pass.length < 6) { msg.textContent = 'Password must be at least 6 characters.'; msg.style.display='block'; return; }
+  try {
+    // Check if founder already exists in Firestore
+    const usersSnap = await getDocs(collection(db, 'users'));
+    const founderExists = usersSnap.docs.some(d => d.data().role === 'founder');
+    if (founderExists) { msg.textContent = 'Founder account already exists. Just sign in!'; msg.style.color='#2e7d32'; msg.style.display='block'; return; }
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    const uid = cred.user.uid;
+    const founderData = { id: uid, uid, name: 'Mr. Hazem Mohra', email, role: 'founder', status: 'active', joined: new Date().toISOString().split('T')[0], classroomId: null };
+    await setDoc(doc(db, 'users', uid), founderData);
+    await setDoc(doc(db, 'meta', 'counters'), { nextId: 100 });
+    // Add welcome announcement
+    await setDoc(doc(db, 'announcements', '1'), { id: 1, title: 'Welcome to MOHRA Academy!', body: 'Welcome all students to MOHRA Math Academy. Check the materials section for course resources.', author: 'founder', date: new Date().toISOString() });
+    msg.style.color = '#2e7d32';
+    msg.textContent = '\u2705 Founder account created! You are now signed in.';
+    msg.style.display = 'block';
+  } catch(e) {
+    const m = e.code === 'auth/email-already-in-use' ? 'This email already has an account. Just sign in!'
+      : e.code === 'auth/invalid-email' ? 'Invalid email address.'
+      : 'Error: ' + e.message;
+    msg.style.color = '#c62828';
+    msg.textContent = m;
+    msg.style.display = 'block';
+  }
+};
+</script>
 <style>
 :root {
   --navy: #1a237e;
@@ -388,13 +591,23 @@ label[for="remember-me"]:hover { color:var(--navy); }
 
     <div id="login-form">
       <div class="error-msg" id="login-error"></div>
-      <div class="field"><label>Username</label><input type="text" id="login-user" placeholder="Enter username"/></div>
-      <div class="field"><label>Password</label><div style="position:relative"><input type="password" id="login-pass" placeholder="Enter password" style="width:100%;padding-right:46px"/><button type="button" onclick="togglePass('login-pass',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.15rem;line-height:1;padding:0;color:var(--subtext)">👁</button></div></div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;margin-top:4px">
-        <input type="checkbox" id="remember-me" style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;border-radius:4px"/>
-        <label for="remember-me" style="font-size:0.88rem;color:var(--subtext);cursor:pointer;user-select:none;font-weight:500">Remember me on this device</label>
+      <div class="field"><label>Email Address</label><input type="email" id="login-email" placeholder="Enter your email" onkeydown="if(event.key==='Enter')doFirebaseLogin()"/></div>
+      <div class="field"><label>Password</label><div style="position:relative"><input type="password" id="login-pass" placeholder="Enter password" style="width:100%;padding-right:46px" onkeydown="if(event.key==='Enter')doFirebaseLogin()"/><button type="button" onclick="togglePass('login-pass',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.15rem;line-height:1;padding:0;color:var(--subtext)">👁</button></div></div>
+      <button class="btn btn-primary" id="login-btn" onclick="doFirebaseLogin()">Sign In →</button>
+      <div style="text-align:center;margin-top:14px">
+        <button onclick="doForgotPassword()" style="background:none;border:none;color:var(--sky);font-size:0.88rem;cursor:pointer;text-decoration:underline;font-family:inherit">Forgot password?</button>
       </div>
-      <button class="btn btn-primary" onclick="doLogin()">Sign In →</button>
+      <div id="first-setup-area" style="margin-top:20px;padding:14px;background:#e8eaf6;border-radius:10px;text-align:center;display:none">
+        <div style="font-size:0.82rem;color:#3949ab;margin-bottom:10px;font-weight:600">⚙️ First Time Setup</div>
+        <div style="font-size:0.78rem;color:#5c6bc0;margin-bottom:10px">Create the founder admin account for Mr. Hazem Mohra</div>
+        <input type="email" id="setup-email" placeholder="Founder email (e.g. mohra@gmail.com)" style="width:100%;padding:10px 14px;border:2px solid #c5cae9;border-radius:8px;font-family:inherit;font-size:0.88rem;margin-bottom:8px;outline:none"/>
+        <input type="password" id="setup-pass" placeholder="Set founder password (min 6 chars)" style="width:100%;padding:10px 14px;border:2px solid #c5cae9;border-radius:8px;font-family:inherit;font-size:0.88rem;margin-bottom:10px;outline:none"/>
+        <button onclick="setupFounderAccount()" style="background:#1a237e;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:0.88rem;font-weight:600;width:100%">Create Founder Account →</button>
+        <div id="setup-msg" style="margin-top:8px;font-size:0.78rem;color:#c62828;display:none"></div>
+      </div>
+      <div style="text-align:center;margin-top:10px">
+        <button onclick="document.getElementById('first-setup-area').style.display=document.getElementById('first-setup-area').style.display==='none'?'block':'none'" style="background:none;border:none;color:#9fa8da;font-size:0.75rem;cursor:pointer;font-family:inherit">First time? Setup founder account</button>
+      </div>
     </div>
 
 
@@ -416,7 +629,7 @@ label[for="remember-me"]:hover { color:var(--navy); }
         <span id="header-username"></span>
         <span class="role-badge" id="header-role-badge"></span>
       </div>
-      <button class="btn-logout" onclick="doLogout()">Log Out</button>
+      <button class="btn-logout" onclick="doFirebaseLogout()">Log Out</button>
     </div>
   </header>
 
@@ -743,7 +956,7 @@ label[for="remember-me"]:hover { color:var(--navy); }
       <button class="modal-close" onclick="closeModal('modal-create-account')">✕</button>
     </div>
     <div class="field"><label>Full Name</label><input type="text" id="ca-name" placeholder="e.g. Ahmed Ali"/></div>
-    <div class="field"><label>Username</label><input type="text" id="ca-username" placeholder="e.g. ahmed_ali"/></div>
+    <div class="field"><label>Email Address</label><input type="email" id="ca-email" placeholder="e.g. ahmed@gmail.com"/></div>
     <div class="field"><label>Password</label>
       <div style="position:relative">
         <input type="password" id="ca-password" placeholder="Set a password" style="width:100%;padding-right:46px"/>
@@ -765,7 +978,7 @@ label[for="remember-me"]:hover { color:var(--navy); }
     <div class="error-msg" id="ca-error"></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('modal-create-account')">Cancel</button>
-      <button class="btn btn-primary" style="width:auto" onclick="createAccount()">Create →</button>
+      <button class="btn btn-primary" style="width:auto" onclick="doCreateFirebaseAccount()">Create →</button>
     </div>
   </div>
 </div>
@@ -851,14 +1064,7 @@ const DEFAULT_STATE = {
 };
 
 function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      // Merge with defaults so new fields are always present
-      return Object.assign({}, DEFAULT_STATE, parsed);
-    }
-  } catch(e) { console.warn('Could not load from localStorage:', e); }
+  // Data is now loaded from Firebase - return clean defaults
   return Object.assign({}, DEFAULT_STATE);
 }
 
@@ -899,8 +1105,15 @@ function doImport(e) {
       if (!parsed.users) { toast('Invalid backup file.', 'error'); return; }
       if (!confirm('This will REPLACE all current data with the backup. Continue?')) return;
       Object.assign(state, parsed);
-      saveToStorage();
-      location.reload();
+      // Save everything to Firebase
+      if(window._fbSaveDoc) {
+        const cols = ['users','materials','recordings','announcements','classrooms','homework','grades','questions','notes','schedule'];
+        const saves = [];
+        for(const col of cols) {
+          if(Array.isArray(state[col])) state[col].forEach(item => saves.push(window._fbSaveDoc(col, item.uid||item.id, item)));
+        }
+        Promise.all(saves).then(() => location.reload());
+      } else { location.reload(); }
     } catch(err) { toast('Failed to read backup file.', 'error'); }
   };
   reader.readAsText(file);
@@ -916,22 +1129,8 @@ function resetAllData() {
 
 
 function saveToStorage() {
-  try {
-    const toSave = {
-      users: state.users,
-      materials: state.materials,
-      recordings: state.recordings,
-      announcements: state.announcements,
-      nextId: state.nextId,
-      classrooms: state.classrooms,
-      homework: state.homework,
-      grades: state.grades,
-      questions: state.questions,
-      notes: state.notes,
-      schedule: state.schedule,
-    };
-    localStorage.setItem(LS_KEY, JSON.stringify(toSave));
-  } catch(e) { console.warn('Could not save to localStorage:', e); }
+  // Data is now saved to Firebase per-operation via _fbSaveDoc/_fbDeleteDoc
+  // This function kept as no-op for compatibility
 }
 
 let state = {
@@ -951,21 +1150,13 @@ window.onload = () => {
   document.getElementById('header-logo-img').src = LOGO_B64;
   document.getElementById('hero-logo-img').src = LOGO_B64;
   buildParticles();
-  // Auto-login if remembered
-  try {
-    const saved = sessionStorage.getItem('mohra_remembered');
-    if (saved) {
-      const { username, password } = JSON.parse(saved);
-      const user = state.users.find(x => x.username === username && x.password === password);
-      if (user && user.status !== 'banned') {
-        document.getElementById('remember-me').checked = true;
-        loginAs(user);
-        return;
-      } else {
-        sessionStorage.removeItem('mohra_remembered');
-      }
-    }
-  } catch(e) {}
+  // Auth is handled by Firebase onAuthStateChanged listener
+  // Show loading state until Firebase resolves
+  document.getElementById('login-btn') && (document.getElementById('login-btn').textContent = 'Loading...');
+  setTimeout(() => {
+    const btn = document.getElementById('login-btn');
+    if (btn && btn.textContent === 'Loading...') btn.textContent = 'Sign In →';
+  }, 3000);
 };
 
 function togglePass(id, btn) {
@@ -993,27 +1184,9 @@ function buildParticles() {
 // ═══════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════
-function prefillFounder() {
-  document.getElementById('login-user').value = 'founder';
-  document.getElementById('login-pass').value = 'mohra2024';
-}
+// prefillFounder removed - using Firebase Auth
 
-function doLogin() {
-  const u = document.getElementById('login-user').value.trim();
-  const p = document.getElementById('login-pass').value;
-  const remember = document.getElementById('remember-me').checked;
-  const err = document.getElementById('login-error');
-  const user = state.users.find(x => x.username === u && x.password === p);
-  if (!user) { showErr(err, 'Invalid username or password.'); return; }
-  if (user.status === 'banned') { showErr(err, 'This account has been banned.'); return; }
-  err.style.display = 'none';
-  if (remember) {
-    try { sessionStorage.setItem('mohra_remembered', JSON.stringify({ username: user.username, password: user.password })); } catch(e) {}
-  } else {
-    try { sessionStorage.removeItem('mohra_remembered'); } catch(e) {}
-  }
-  loginAs(user);
-}
+// doLogin replaced by doFirebaseLogin (Firebase Auth)
 
 function loginAs(user) {
   state.currentUser = user;
@@ -1040,16 +1213,7 @@ function loginAs(user) {
   showPage('dashboard');
 }
 
-function doLogout() {
-  try { sessionStorage.removeItem('mohra_remembered'); } catch(e) {}
-  state.currentUser = null;
-  document.getElementById('auth-screen').style.display = 'flex';
-  document.getElementById('main-app').style.display = 'none';
-  document.getElementById('login-user').value = '';
-  document.getElementById('login-pass').value = '';
-  const rm = document.getElementById('remember-me');
-  if (rm) rm.checked = false;
-}
+// doLogout replaced by doFirebaseLogout (Firebase Auth)
 
 function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
 
@@ -1170,7 +1334,8 @@ function saveMaterial() {
     uploader: state.currentUser.name
   };
   state.materials.unshift(mat);
-  saveToStorage();
+  window._fbSaveDoc && window._fbSaveDoc('materials', mat.id, mat);
+  window._fbSaveNextId && window._fbSaveNextId();
   state.pendingMaterialFile = null;
   state.pendingMaterialB64 = null;
   document.getElementById('mat-file-input').value = '';
@@ -1231,7 +1396,7 @@ function renderMaterials() {
 
 function deleteMaterial(id) {
   state.materials = state.materials.filter(m => m.id !== id);
-  saveToStorage();
+  window._fbDeleteDoc && window._fbDeleteDoc('materials', id);
   renderMaterials(); renderDashboard();
   toast('Material deleted.', 'warn');
 }
@@ -1272,7 +1437,8 @@ function saveRecording() {
     uploader: state.currentUser.name
   };
   state.recordings.unshift(rec);
-  saveToStorage();
+  window._fbSaveDoc && window._fbSaveDoc('recordings', rec.id, rec);
+  window._fbSaveNextId && window._fbSaveNextId();
   state.pendingRecordingFile = null;
   state.pendingRecordingB64 = null;
   document.getElementById('rec-file-input').value = '';
@@ -1348,7 +1514,7 @@ function closeVideoModal() {
 
 function deleteRecording(id) {
   state.recordings = state.recordings.filter(r => r.id !== id);
-  saveToStorage();
+  window._fbDeleteDoc && window._fbDeleteDoc('recordings', id);
   renderRecordings(); renderDashboard();
   toast('Recording deleted.', 'warn');
 }
@@ -1362,8 +1528,10 @@ function postAnnouncement() {
   const title = document.getElementById('ann-title').value.trim();
   const body = document.getElementById('ann-body').value.trim();
   if (!title || !body) { toast('Title and message required.', 'error'); return; }
-  state.announcements.push({ id: state.nextId++, title, body, author: state.currentUser.username, date: new Date().toISOString() });
-  saveToStorage();
+  const ann = { id: state.nextId++, title, body, author: state.currentUser.username, date: new Date().toISOString() };
+  state.announcements.push(ann);
+  window._fbSaveDoc && window._fbSaveDoc('announcements', ann.id, ann);
+  window._fbSaveNextId && window._fbSaveNextId();
   document.getElementById('ann-title').value = '';
   document.getElementById('ann-body').value = '';
   closeModal('modal-announcement');
@@ -1394,7 +1562,7 @@ function renderAnnouncements() {
 
 function deleteAnn(id) {
   state.announcements = state.announcements.filter(a => a.id !== id);
-  saveToStorage();
+  window._fbDeleteDoc && window._fbDeleteDoc('announcements', id);
   renderAnnouncements(); renderDashboard();
   toast('Announcement removed.', 'warn');
 }
@@ -1481,7 +1649,7 @@ function banUser(id) {
   const u = state.users.find(x => x.id===id);
   if (!u) return;
   u.status = 'banned';
-  saveToStorage();
+  window._fbSaveDoc && window._fbSaveDoc('users', u.uid||u.id, u);
   renderUsers(); renderAdminTable();
   toast(`${u.name} has been banned.`, 'warn');
 }
@@ -1490,7 +1658,7 @@ function unbanUser(id) {
   const u = state.users.find(x => x.id===id);
   if (!u) return;
   u.status = 'active';
-  saveToStorage();
+  window._fbSaveDoc && window._fbSaveDoc('users', u.uid||u.id, u);
   renderUsers(); renderAdminTable();
   toast(`${u.name} has been unbanned. ✅`, 'success');
 }
@@ -1499,7 +1667,7 @@ function changeRole(id, role) {
   const u = state.users.find(x => x.id===id);
   if (!u) return;
   u.role = role;
-  saveToStorage();
+  window._fbSaveDoc && window._fbSaveDoc('users', u.uid||u.id, u);
   renderAdminTable();
   toast(`${u.name}'s role set to ${role}! ✅`, 'success');
 }
@@ -1527,8 +1695,8 @@ function confirmAssignClassroom() {
   const clsId = document.getElementById('assign-cls-select').value;
   const u = state.users.find(x => x.id === userId);
   if (!u) return;
-  u.classroomId = clsId ? parseInt(clsId) : null;
-  saveToStorage();
+  u.classroomId = clsId ? clsId : null;
+  window._fbSaveDoc && window._fbSaveDoc('users', u.uid||u.id, u);
   closeModal('modal-assign-classroom');
   renderUsers(); renderAdminTable();
   const cls = clsId ? state.classrooms.find(c => parseInt(c.id) === parseInt(clsId)) : null;
@@ -1538,8 +1706,8 @@ function confirmAssignClassroom() {
 function assignClassroom(id, clsId) {
   const u = state.users.find(x => x.id===id);
   if (!u) return;
-  u.classroomId = clsId ? parseInt(clsId) : null;
-  saveToStorage();
+  u.classroomId = clsId ? clsId : null;
+  window._fbSaveDoc&&window._fbSaveDoc('users',u.uid||u.id,u);
   renderAdminTable();
   const cls = clsId ? state.classrooms.find(c=>parseInt(c.id)===parseInt(clsId)) : null;
   toast(cls ? `${u.name} assigned to "${cls.name}" 🏫` : `${u.name} removed from classroom.`, 'success');
@@ -1549,7 +1717,7 @@ function promoteUser(id) {
   const u = state.users.find(x => x.id===id);
   if (!u) return;
   u.role = 'admin';
-  saveToStorage();
+  window._fbSaveDoc&&window._fbSaveDoc('users',u.uid||u.id,u);
   renderAdminTable();
   toast(`${u.name} promoted to Admin! ⬆`, 'success');
 }
@@ -1558,7 +1726,7 @@ function demoteUser(id) {
   const u = state.users.find(x => x.id===id);
   if (!u) return;
   u.role = 'student';
-  saveToStorage();
+  window._fbSaveDoc&&window._fbSaveDoc('users',u.uid||u.id,u);
   renderAdminTable();
   toast(`${u.name} demoted to student.`, 'warn');
 }
@@ -1567,8 +1735,9 @@ function deleteUser(id) {
   const u = state.users.find(x => x.id===id);
   if (!u || u.role==='founder') return;
   if (!confirm(`Delete account "${u.username}"? This cannot be undone.`)) return;
+  const _du = state.users.find(x=>x.id===id);
   state.users = state.users.filter(x => x.id!==id);
-  saveToStorage();
+  if(_du) window._fbDeleteDoc&&window._fbDeleteDoc('users',_du.uid||_du.id);
   renderUsers(); renderAdminTable();
   toast(`Account deleted.`, 'warn');
 }
@@ -1586,31 +1755,7 @@ function openCreateAccount() {
   openModal('modal-create-account');
 }
 
-function createAccount() {
-  const name = document.getElementById('ca-name').value.trim();
-  const username = document.getElementById('ca-username').value.trim();
-  const password = document.getElementById('ca-password').value;
-  const role = document.getElementById('ca-role').value;
-  const classroomId = document.getElementById('ca-classroom').value;
-  const err = document.getElementById('ca-error');
-  if (!name || !username || !password) { showErr(err, 'All fields required.'); return; }
-  if (state.users.find(x => x.username===username)) { showErr(err, 'Username already taken.'); return; }
-  const user = {
-    id: state.nextId++, name, username, password, role, status: 'active',
-    joined: new Date().toISOString().split('T')[0],
-    classroomId: classroomId ? parseInt(classroomId) : null
-  };
-  state.users.push(user);
-  saveToStorage();
-  err.style.display = 'none';
-  document.getElementById('ca-name').value = '';
-  document.getElementById('ca-username').value = '';
-  document.getElementById('ca-password').value = '';
-  document.getElementById('ca-classroom').value = '';
-  closeModal('modal-create-account');
-  renderAdminTable(); renderDashboard();
-  toast(`Account created for ${name}! ✅`, 'success');
-}
+// createAccount replaced by doCreateFirebaseAccount
 
 // ═══════════════════════════════════════════════
 //  MODALS
@@ -1649,7 +1794,8 @@ function createClassroom() {
     studentCount: 0
   };
   state.classrooms.unshift(cls);
-  saveToStorage();
+  window._fbSaveDoc && window._fbSaveDoc('classrooms', cls.id, cls);
+  window._fbSaveNextId && window._fbSaveNextId();
   document.getElementById('cls-name').value = '';
   document.getElementById('cls-desc').value = '';
   document.getElementById('cls-level').value = '';
@@ -1705,7 +1851,8 @@ function saveEditClassroom() {
   cls.name = name;
   cls.desc = document.getElementById('edit-cls-desc').value.trim();
   cls.level = document.getElementById('edit-cls-level').value.trim();
-  saveToStorage();
+  const _cls2 = state.classrooms.find(c=>c.id===parseInt(document.getElementById('edit-cls-id').value));
+  if(_cls2) window._fbSaveDoc && window._fbSaveDoc('classrooms', _cls2.id, _cls2);
   closeModal('modal-edit-classroom');
   renderClassrooms();
   toast(`Classroom updated! ✅`, 'success');
@@ -1716,7 +1863,7 @@ function deleteClassroom(id) {
   if (!cls) return;
   if (!confirm(`Delete classroom "${cls.name}"? This cannot be undone.`)) return;
   state.classrooms = state.classrooms.filter(c => c.id !== id);
-  saveToStorage();
+  window._fbDeleteDoc && window._fbDeleteDoc('classrooms', id);
   renderClassrooms();
   renderDashboard();
   toast('Classroom deleted.', 'warn');
@@ -1739,8 +1886,10 @@ function postHomework() {
   const due = document.getElementById('hw-due').value;
   const classroom = document.getElementById('hw-classroom').value;
   if (!title) { toast('Please enter a title.','error'); return; }
-  state.homework.unshift({ id:state.nextId++, title, desc, due, classroom, date:new Date().toISOString(), author:state.currentUser.name, status:'open' });
-  saveToStorage();
+  const hw = { id:state.nextId++, title, desc, due, classroom, date:new Date().toISOString(), author:state.currentUser.name, status:'open' };
+  state.homework.unshift(hw);
+  window._fbSaveDoc && window._fbSaveDoc('homework', hw.id, hw);
+  window._fbSaveNextId && window._fbSaveNextId();
   document.getElementById('hw-title').value='';
   document.getElementById('hw-desc').value='';
   document.getElementById('hw-due').value='';
@@ -1785,11 +1934,10 @@ function renderHomework() {
 
 function toggleHW(id) {
   const h = state.homework.find(x=>x.id===id);
-  if(h) h.status = h.status==='open'?'closed':'open';
-  saveToStorage();
+  if(h) { h.status = h.status==='open'?'closed':'open'; window._fbSaveDoc && window._fbSaveDoc('homework', h.id, h); }
   renderHomework();
 }
-function deleteHW(id) { state.homework=state.homework.filter(x=>x.id!==id); saveToStorage(); renderHomework(); toast('Assignment deleted.','warn'); }
+function deleteHW(id) { state.homework=state.homework.filter(x=>x.id!==id); window._fbDeleteDoc&&window._fbDeleteDoc('homework',id); renderHomework(); toast('Assignment deleted.','warn'); }
 
 // ═══════════════════════════════════════════════
 //  GRADES
@@ -1809,8 +1957,10 @@ function saveGrade() {
   const outOf = parseFloat(document.getElementById('grade-outof').value)||100;
   const note = document.getElementById('grade-note').value.trim();
   if(!subject||document.getElementById('grade-score').value===''||isNaN(score)) { toast('Subject and score required.','error'); return; }
-  state.grades.push({ id:state.nextId++, studentId, subject, score, outOf, note, date:new Date().toISOString() });
-  saveToStorage();
+  const grade = { id:state.nextId++, studentId, subject, score, outOf, note, date:new Date().toISOString() };
+  state.grades.push(grade);
+  window._fbSaveDoc && window._fbSaveDoc('grades', grade.id, grade);
+  window._fbSaveNextId && window._fbSaveNextId();
   document.getElementById('grade-subject').value='';
   document.getElementById('grade-score').value='';
   document.getElementById('grade-note').value='';
@@ -1855,7 +2005,7 @@ function renderGrades() {
   }).join('');
 }
 
-function deleteGrade(id) { state.grades=state.grades.filter(g=>g.id!==id); saveToStorage(); renderGrades(); renderLeaderboard(); toast('Grade removed.','warn'); }
+function deleteGrade(id) { state.grades=state.grades.filter(g=>g.id!==id); window._fbDeleteDoc&&window._fbDeleteDoc('grades',id); renderGrades(); renderLeaderboard(); toast('Grade removed.','warn'); }
 
 // ═══════════════════════════════════════════════
 //  Q&A
@@ -1864,8 +2014,10 @@ function postQuestion() {
   const text = document.getElementById('q-text').value.trim();
   const topic = document.getElementById('q-topic').value.trim();
   if(!text) { toast('Please write your question.','error'); return; }
-  state.questions.unshift({ id:state.nextId++, text, topic, author:state.currentUser.name, authorId:state.currentUser.id, date:new Date().toISOString(), answers:[] });
-  saveToStorage();
+  const q2 = { id:state.nextId++, text, topic, author:state.currentUser.name, authorId:state.currentUser.id, date:new Date().toISOString(), answers:[] };
+  state.questions.unshift(q2);
+  window._fbSaveDoc && window._fbSaveDoc('questions', q2.id, q2);
+  window._fbSaveNextId && window._fbSaveNextId();
   document.getElementById('q-text').value='';
   document.getElementById('q-topic').value='';
   closeModal('modal-question');
@@ -1911,14 +2063,13 @@ function postAnswer(qid) {
   const text = inp.value.trim();
   if(!text) return;
   const q = state.questions.find(x=>x.id===qid);
-  if(q) q.answers.push({ id:state.nextId++, text, author:state.currentUser.name, date:new Date().toISOString() });
-  saveToStorage();
+  if(q) { q.answers.push({ id:state.nextId++, text, author:state.currentUser.name, date:new Date().toISOString() }); window._fbSaveDoc&&window._fbSaveDoc('questions',q.id,q); window._fbSaveNextId&&window._fbSaveNextId(); }
   inp.value='';
   renderQA();
   toast('Answer posted! ✅','success');
 }
-function deleteQuestion(id) { state.questions=state.questions.filter(x=>x.id!==id); saveToStorage(); renderQA(); toast('Question deleted.','warn'); }
-function deleteAnswer(qid,aid) { const q=state.questions.find(x=>x.id===qid); if(q) q.answers=q.answers.filter(a=>a.id!==aid); saveToStorage(); renderQA(); }
+function deleteQuestion(id) { state.questions=state.questions.filter(x=>x.id!==id); window._fbDeleteDoc&&window._fbDeleteDoc('questions',id); renderQA(); toast('Question deleted.','warn'); }
+function deleteAnswer(qid,aid) { const q=state.questions.find(x=>x.id===qid); if(q){q.answers=q.answers.filter(a=>a.id!==aid);window._fbSaveDoc&&window._fbSaveDoc('questions',q.id,q);} renderQA(); }
 
 // ═══════════════════════════════════════════════
 //  LEADERBOARD
@@ -1957,8 +2108,10 @@ function pickNoteColor(el) {
 function saveNote() {
   const text=document.getElementById('note-text').value.trim();
   if(!text){toast('Note cannot be empty.','error');return;}
-  state.notes.unshift({id:state.nextId++,text,color:selectedNoteColor,date:new Date().toISOString()});
-  saveToStorage();
+  const note = {id:state.nextId++,text,color:selectedNoteColor,date:new Date().toISOString()};
+  state.notes.unshift(note);
+  window._fbSaveDoc && window._fbSaveDoc('notes', note.id, note);
+  window._fbSaveNextId && window._fbSaveNextId();
   document.getElementById('note-text').value='';
   closeModal('modal-note');
   renderNotes(); renderDashboard();
@@ -1975,7 +2128,7 @@ function renderNotes() {
       ${canManage?`<button onclick="deleteNote(${n.id})" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.1);border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:0.7rem;display:flex;align-items:center;justify-content:center">✕</button>`:''}
     </div>`).join('')}</div>`;
 }
-function deleteNote(id){state.notes=state.notes.filter(n=>n.id!==id);saveToStorage();renderNotes();renderDashboard();toast('Note removed.','warn');}
+function deleteNote(id){state.notes=state.notes.filter(n=>n.id!==id);window._fbDeleteDoc&&window._fbDeleteDoc('notes',id);renderNotes();renderDashboard();toast('Note removed.','warn');}
 
 // ═══════════════════════════════════════════════
 //  SCHEDULE
@@ -1994,8 +2147,10 @@ function saveSession(){
   const end=document.getElementById('sched-end').value;
   const classroom=document.getElementById('sched-classroom').value;
   if(!title||!start){toast('Title and start time required.','error');return;}
-  state.schedule.push({id:state.nextId++,title,day,start,end,classroom});
-  saveToStorage();
+  const sess = {id:state.nextId++,title,day,start,end,classroom};
+  state.schedule.push(sess);
+  window._fbSaveDoc && window._fbSaveDoc('schedule', sess.id, sess);
+  window._fbSaveNextId && window._fbSaveNextId();
   document.getElementById('sched-title').value='';
   document.getElementById('sched-start').value='';
   document.getElementById('sched-end').value='';
@@ -2023,7 +2178,7 @@ function renderSchedule(){
     </div>`;
   }).join('');
 }
-function deleteSession(id){state.schedule=state.schedule.filter(s=>s.id!==id);saveToStorage();renderSchedule();toast('Session removed.','warn');}
+function deleteSession(id){state.schedule=state.schedule.filter(s=>s.id!==id);window._fbDeleteDoc&&window._fbDeleteDoc('schedule',id);renderSchedule();toast('Session removed.','warn');}
 
 // ═══════════════════════════════════════════════
 //  HELPERS
