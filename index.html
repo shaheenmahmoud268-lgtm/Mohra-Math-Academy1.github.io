@@ -323,6 +323,15 @@ window.doCreateFirebaseAccount = async function() {
     }
     const uid = data.localId;
     const user = { id: uid, uid, name, email, role, status: 'active', joined: new Date().toISOString().split('T')[0], classroomId: classroomId || null };
+    if (role === 'parent') {
+      const childEmail = document.getElementById('ca-child-email')?.value.trim();
+      if (childEmail) {
+        user.childEmail = childEmail;
+        // Link parent to child by childEmail
+        const child = state.users.find(u => u.email === childEmail && u.role === 'student');
+        if (child) { child.parentId = uid; child.parentEmail = email; window._fbSaveDoc && window._fbSaveDoc('users', child.id, child); }
+      }
+    }
     await window._fbSaveDoc('users', uid, user);
     state.users.push(user);
     err.style.display = 'none';
@@ -729,6 +738,199 @@ label[for="remember-me"]:hover { color:var(--navy); }
 @keyframes fadeInUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 .retry-btn { margin-top:10px;background:var(--navy);color:white;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:0.82rem;font-weight:600; }
 .retry-btn:hover { opacity:0.85; }
+
+/* ── FLOATING CHAT BUBBLE ── */
+#tutor-float-btn {
+  position:fixed; bottom:28px; right:28px; z-index:900;
+  width:62px; height:62px; border-radius:50%;
+  background: linear-gradient(135deg, #C5A059, #a07830);
+  border:none; cursor:pointer; box-shadow:0 6px 28px rgba(197,160,89,0.55);
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.6rem; transition:transform 0.25s, box-shadow 0.25s;
+  animation: float-pulse 3s ease-in-out infinite;
+}
+#tutor-float-btn:hover { transform:scale(1.1); box-shadow:0 10px 36px rgba(197,160,89,0.7); }
+@keyframes float-pulse {
+  0%,100%{ box-shadow:0 6px 28px rgba(197,160,89,0.55); }
+  50%{ box-shadow:0 10px 40px rgba(197,160,89,0.8); }
+}
+#tutor-float-badge {
+  position:absolute; top:-4px; right:-4px;
+  width:20px; height:20px; border-radius:50%;
+  background:#ef5350; color:white; font-size:0.65rem; font-weight:700;
+  display:none; align-items:center; justify-content:center;
+  border:2px solid white;
+}
+#tutor-float-panel {
+  position:fixed; bottom:104px; right:28px; z-index:900;
+  width:380px; max-width:calc(100vw - 40px);
+  background:white; border-radius:20px;
+  box-shadow:0 20px 60px rgba(0,0,0,0.22), 0 0 0 1px rgba(197,160,89,0.2);
+  display:none; flex-direction:column; overflow:hidden;
+  max-height:560px; animation:slideUpPanel 0.3s cubic-bezier(0.16,1,0.3,1);
+}
+#tutor-float-panel.open { display:flex; }
+@keyframes slideUpPanel {
+  from{opacity:0;transform:translateY(20px) scale(0.95);}
+  to{opacity:1;transform:translateY(0) scale(1);}
+}
+.float-panel-header {
+  background: linear-gradient(135deg, #1a237e 0%, #C5A059 200%);
+  padding:16px 18px; display:flex; align-items:center; gap:12px;
+  flex-shrink:0;
+}
+.float-panel-avatar {
+  width:42px; height:42px; border-radius:50%;
+  background:rgba(197,160,89,0.3); border:2px solid rgba(197,160,89,0.6);
+  display:flex; align-items:center; justify-content:center; font-size:1.3rem;
+}
+.float-panel-title { color:white; }
+.float-panel-title h4 { font-family:'Cormorant Garamond',serif; font-size:1.05rem; font-weight:600; line-height:1.2; }
+.float-panel-title span { font-size:0.72rem; color:rgba(255,255,255,0.65); }
+.float-panel-close {
+  margin-left:auto; background:rgba(255,255,255,0.15); border:none;
+  border-radius:8px; padding:6px 9px; cursor:pointer; color:white; font-size:1rem;
+}
+.float-panel-msgs {
+  flex:1; overflow-y:auto; padding:14px;
+  display:flex; flex-direction:column; gap:10px;
+  font-family:'Cormorant Garamond',serif;
+}
+.float-msg { display:flex; gap:8px; align-items:flex-start; }
+.float-msg.float-user { flex-direction:row-reverse; }
+.float-avatar-sm {
+  width:28px; height:28px; border-radius:50%; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.8rem; font-weight:700;
+  background:#e8eaf6; color:var(--navy);
+}
+.float-msg.float-user .float-avatar-sm { background:var(--navy); color:white; }
+.float-bubble {
+  max-width:82%; padding:9px 13px; border-radius:14px;
+  font-size:0.9rem; line-height:1.55; background:#f4f2ff;
+  border:1px solid #e0ddf5; color:#1a237e;
+}
+.float-msg.float-user .float-bubble {
+  background: linear-gradient(135deg,#1a237e,#3949ab);
+  color:white; border-color:transparent;
+}
+.float-bubble.socratic { background:#fff8e6; border-color:#C5A059; }
+.float-input-row {
+  padding:12px 14px; border-top:1px solid var(--border);
+  display:flex; gap:8px; flex-shrink:0; background:white;
+}
+.float-input-row textarea {
+  flex:1; resize:none; padding:9px 12px; border:2px solid var(--border);
+  border-radius:10px; font-family:'Cormorant Garamond',serif;
+  font-size:0.92rem; outline:none; transition:border .2s; line-height:1.4;
+}
+.float-input-row textarea:focus { border-color:#C5A059; }
+.float-send-btn {
+  background: linear-gradient(135deg,#C5A059,#a07830);
+  color:white; border:none; border-radius:10px; padding:9px 15px;
+  cursor:pointer; font-weight:700; font-size:0.88rem; transition:opacity .2s;
+  white-space:nowrap;
+}
+.float-send-btn:hover { opacity:0.88; }
+
+/* ── OVERSIGHT DASHBOARD ── */
+.oversight-toggle-row {
+  display:flex; align-items:center; gap:14px; padding:14px 20px;
+  background: linear-gradient(90deg, #fff9e6, #fffdf7);
+  border:1px solid #C5A059; border-radius:12px; margin-bottom:18px;
+}
+.toggle-switch {
+  position:relative; width:48px; height:26px; flex-shrink:0;
+}
+.toggle-switch input { opacity:0; width:0; height:0; }
+.toggle-slider {
+  position:absolute; inset:0; cursor:pointer;
+  background:#ccc; border-radius:26px; transition:0.3s;
+}
+.toggle-slider:before {
+  content:''; position:absolute; width:20px; height:20px;
+  left:3px; bottom:3px; background:white; border-radius:50%;
+  transition:0.3s; box-shadow:0 1px 4px rgba(0,0,0,0.2);
+}
+input:checked + .toggle-slider { background:#C5A059; }
+input:checked + .toggle-slider:before { transform:translateX(22px); }
+.oversight-label { font-weight:700; color:var(--navy); font-size:0.95rem; }
+.oversight-label span { display:block; font-size:0.78rem; color:var(--subtext); font-weight:400; margin-top:1px; }
+
+.oversight-student-card {
+  display:flex; align-items:center; gap:12px; padding:14px 16px;
+  border:1px solid var(--border); border-radius:12px; cursor:pointer;
+  transition:all 0.2s; background:white; margin-bottom:8px;
+}
+.oversight-student-card:hover { border-color:#C5A059; box-shadow:0 3px 14px rgba(197,160,89,0.2); }
+.oversight-student-card.has-flag { border-color:#ef5350; background:#fff8f8; }
+.oversight-avatar {
+  width:40px; height:40px; border-radius:50%; background:var(--navy);
+  color:white; display:flex; align-items:center; justify-content:center;
+  font-size:1rem; font-weight:700; flex-shrink:0;
+}
+.struggle-flag { color:#ef5350; font-size:1.1rem; margin-left:auto; animation:wiggle 0.8s ease infinite; }
+@keyframes wiggle { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-12deg)} 75%{transform:rotate(12deg)} }
+.topic-tag {
+  padding:3px 9px; border-radius:20px; font-size:0.7rem; font-weight:700;
+  background:#fff9e6; color:#b8860b; border:1px solid #C5A059; white-space:nowrap;
+}
+.topic-tag.mastered { background:#e8f5e9; color:#2e7d32; border-color:#66bb6a; }
+.live-dot {
+  width:9px; height:9px; border-radius:50%; background:#66bb6a;
+  box-shadow:0 0 6px #66bb6a; animation:live-pulse 1.5s ease-in-out infinite;
+}
+@keyframes live-pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+
+/* Chat transcript viewer */
+.transcript-modal {
+  position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1100;
+  display:flex; align-items:center; justify-content:center; padding:20px;
+  opacity:0; pointer-events:none; transition:opacity 0.2s;
+}
+.transcript-modal.open { opacity:1; pointer-events:all; }
+.transcript-box {
+  background:white; border-radius:18px; width:520px; max-width:100%;
+  max-height:80vh; overflow-y:auto; padding:28px;
+  box-shadow:0 24px 80px rgba(0,0,0,0.25);
+  transform:scale(0.95); transition:transform 0.2s;
+}
+.transcript-modal.open .transcript-box { transform:scale(1); }
+
+/* ── ANALYTICS PAGE ── */
+.analytics-grid {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:18px; margin-bottom:24px;
+}
+.analytics-card {
+  background:white; border-radius:16px; padding:22px;
+  box-shadow:var(--shadow); border:1px solid var(--border);
+}
+.analytics-card-title {
+  font-family:'Playfair Display',serif; font-size:1rem; font-weight:700;
+  color:var(--navy); margin-bottom:16px; display:flex; align-items:center; gap:8px;
+}
+.mini-bar-wrap { margin-bottom:8px; }
+.mini-bar-label { display:flex; justify-content:space-between; font-size:0.78rem; color:var(--subtext); margin-bottom:3px; }
+.mini-bar-track { height:8px; background:#e8eaf6; border-radius:4px; overflow:hidden; }
+.mini-bar-fill { height:100%; border-radius:4px; background: linear-gradient(90deg,#1a237e,#5c6bc0); transition:width 0.6s; }
+.mini-bar-fill.gold { background: linear-gradient(90deg,#C5A059,#ffd54f); }
+.mini-bar-fill.green { background: linear-gradient(90deg,#2e7d32,#66bb6a); }
+.mini-bar-fill.red { background: linear-gradient(90deg,#c62828,#ef5350); }
+
+/* ── PARENT PORTAL ── */
+.parent-child-card {
+  background: linear-gradient(135deg,#e8eaf6,#f3e5f5);
+  border-radius:14px; padding:20px; margin-bottom:18px;
+  border-left:4px solid #C5A059;
+}
+.parent-child-name { font-family:'Playfair Display',serif; font-size:1.2rem; font-weight:700; color:var(--navy); }
+.parent-grade-pill {
+  display:inline-flex; align-items:center; gap:6px;
+  background:white; border-radius:100px; padding:5px 14px;
+  font-size:0.82rem; font-weight:700; color:var(--navy);
+  box-shadow:0 2px 8px rgba(0,0,0,0.08);
+}
 </style>
 </head>
 <body>
@@ -832,6 +1034,14 @@ label[for="remember-me"]:hover { color:var(--navy); }
     <button class="nav-item" onclick="showPage('aitutor')" data-page="aitutor">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 9h-2V5h2v6zm0 4h-2v-2h2v2z"/></svg>
       AI Tutor
+    </button>
+    <button class="nav-item founder-only" onclick="showPage('analytics')" data-page="analytics" style="display:none">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
+      Analytics
+    </button>
+    <button class="nav-item parent-only" onclick="showPage('parent')" data-page="parent" style="display:none">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+      Parent Portal
     </button>
   </nav>
 
@@ -1031,7 +1241,7 @@ label[for="remember-me"]:hover { color:var(--navy); }
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
           <div style="position:relative;flex:1;min-width:260px">
-            <input type="password" id="ai-key-input" placeholder="sk-ant-api03-..."
+            <input type="password" id="ai-key-input" placeholder="AIza..."
               style="width:100%;padding:11px 46px 11px 14px;border:2px solid var(--border);border-radius:10px;font-family:monospace;font-size:0.88rem;outline:none;transition:border .2s;box-sizing:border-box"
               onfocus="this.style.borderColor='var(--blue)'" onblur="this.style.borderColor='var(--border)'"
               onkeydown="if(event.key==='Enter')saveAiApiKey()"/>
@@ -1042,7 +1252,7 @@ label[for="remember-me"]:hover { color:var(--navy); }
           <button onclick="removeAiApiKey()" class="btn btn-danger" style="white-space:nowrap">🗑 Remove</button>
         </div>
         <div style="margin-top:12px;padding:10px 14px;background:var(--bg);border-radius:8px;font-size:0.82rem;color:var(--subtext);line-height:1.7">
-          🔑 Get a free API key at <strong>console.anthropic.com</strong> → API Keys → Create Key<br>
+          🔑 Get a free API key at <strong>aistudio.google.com</strong> → Get API Key<br>
           🔒 The key is stored securely in your database — students never see it<br>
           👥 All students and admins automatically use this key when it's set
         </div>
@@ -1227,8 +1437,102 @@ label[for="remember-me"]:hover { color:var(--navy); }
       </div>
     </div>
 
+    <!-- ══ ANALYTICS PAGE ══ -->
+    <div class="page" id="page-analytics">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">📈 Student Progress Analytics</div>
+            <div class="card-subtitle">Performance overview — powered by live grade data</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="renderAnalytics()">🔄 Refresh</button>
+        </div>
+        <div id="analytics-content">
+          <div class="empty-state"><div class="empty-icon">📊</div><h3>Loading analytics...</h3></div>
+        </div>
+      </div>
+
+      <!-- Oversight Section -->
+      <div class="card" id="oversight-section">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🔭 Live Student Oversight</div>
+            <div class="card-subtitle">Monitor AI Tutor sessions in real-time</div>
+          </div>
+        </div>
+        <div class="oversight-toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="oversight-toggle" onchange="toggleOversight(this.checked)"/>
+            <span class="toggle-slider"></span>
+          </label>
+          <div class="oversight-label">Live Student Oversight <span>When ON — see all active AI sessions, struggle alerts, and topic tags</span></div>
+        </div>
+        <div id="oversight-panel" style="display:none">
+          <div id="oversight-students">
+            <div class="empty-state"><div class="empty-icon">🎓</div><h3>No active AI sessions</h3><p>Students will appear here when they use the AI Tutor</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PARENT PORTAL PAGE ══ -->
+    <div class="page" id="page-parent">
+      <div class="hero">
+        <img id="parent-hero-logo" class="hero-logo" src="" alt="MOHRA"/>
+        <div class="hero-text">
+          <h2>Parent Portal</h2>
+          <p>Track your child's academic journey at MOHRA Math Academy</p>
+        </div>
+      </div>
+      <div id="parent-content">
+        <div class="empty-state"><div class="empty-icon">👨‍👩‍👧</div><h3>Loading your child's data...</h3></div>
+      </div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /main-app -->
+
+<!-- ══ FLOATING CHAT BUBBLE ══ -->
+<button id="tutor-float-btn" onclick="toggleFloatPanel()" title="MOHRA Assistant" style="display:none">
+  🎓
+  <span id="tutor-float-badge"></span>
+</button>
+
+<div id="tutor-float-panel">
+  <div class="float-panel-header">
+    <div class="float-panel-avatar">🎓</div>
+    <div class="float-panel-title">
+      <h4>MOHRA Assistant</h4>
+      <span>Socratic Math Tutor · Always here to guide</span>
+    </div>
+    <button class="float-panel-close" onclick="toggleFloatPanel()">✕</button>
+  </div>
+  <div class="float-panel-msgs" id="float-msgs">
+    <div class="float-msg float-ai">
+      <div class="float-avatar-sm">🎓</div>
+      <div class="float-bubble socratic">
+        <strong style="font-family:'Cormorant Garamond',serif">Ahlan! I'm your MOHRA Assistant.</strong><br>
+        I'm here to guide you — not give you answers. Ask me any math question and let's discover the solution <em>together</em>. 📐
+      </div>
+    </div>
+  </div>
+  <div class="float-input-row">
+    <textarea id="float-input" rows="2" placeholder="Ask your question...&#10;(Shift+Enter for new line)"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendFloatMessage()}"></textarea>
+    <button class="float-send-btn" onclick="sendFloatMessage()">Send ✈</button>
+  </div>
+</div>
+
+<!-- ══ TRANSCRIPT VIEWER MODAL ══ -->
+<div class="transcript-modal" id="transcript-modal">
+  <div class="transcript-box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h3 style="font-family:'Playfair Display',serif;color:var(--navy)" id="transcript-title">Chat Transcript</h3>
+      <button onclick="closeTranscript()" style="background:var(--bg);border:none;cursor:pointer;padding:7px 12px;border-radius:8px;color:var(--subtext);font-size:0.9rem">✕ Close</button>
+    </div>
+    <div id="transcript-content" style="font-size:0.88rem;line-height:1.6"></div>
+  </div>
+</div>
 
 <!-- ══ MODALS ══ -->
 <div class="modal-overlay" id="modal-create-account">
@@ -1246,9 +1550,10 @@ label[for="remember-me"]:hover { color:var(--navy); }
       </div>
     </div>
     <div class="field"><label>Role</label>
-      <select id="ca-role">
+      <select id="ca-role" onchange="document.getElementById('ca-parent-field').style.display=this.value==='parent'?'block':'none'">
         <option value="student">🎓 Student</option>
         <option value="admin">🛡 Admin</option>
+        <option value="parent">👨‍👩‍👧 Parent</option>
       </select>
     </div>
     <div class="field"><label>Assign to Classroom <span style="font-weight:400;color:var(--subtext)">(optional)</span></label>
@@ -1256,6 +1561,7 @@ label[for="remember-me"]:hover { color:var(--navy); }
         <option value="">— No classroom —</option>
       </select>
     </div>
+    <div class="field" id="ca-parent-field" style="display:none"><label>Child's Email Address <span style="font-weight:400;color:var(--subtext)">(links parent to student)</span></label><input type="email" id="ca-child-email" placeholder="Child's email used to log in"/></div>
     <div class="error-msg" id="ca-error"></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('modal-create-account')">Cancel</button>
@@ -1469,6 +1775,7 @@ function loginAs(user) {
   // Show/hide nav items
   document.querySelectorAll('.admin-only').forEach(el => el.style.display = (user.role==='admin'||user.role==='founder') ? 'flex' : 'none');
   document.querySelectorAll('.founder-only').forEach(el => el.style.display = user.role==='founder' ? 'flex' : 'none');
+  document.querySelectorAll('.parent-only').forEach(el => el.style.display = user.role==='parent' ? 'flex' : 'none');
   // Show upload buttons for admin+founder
   const canUpload = user.role==='admin'||user.role==='founder';
   document.getElementById('upload-material-btn').style.display = canUpload ? 'flex' : 'none';
@@ -1478,8 +1785,15 @@ function loginAs(user) {
     el.style.display = (user.role==='admin'||user.role==='founder') ? 'flex' : 'none';
   });
   document.getElementById('hero-greeting').textContent = `Welcome back, ${user.name}! 👋`;
+  // Show floating tutor button for students
+  const floatBtn = document.getElementById('tutor-float-btn');
+  if (floatBtn) floatBtn.style.display = (user.role==='student') ? 'flex' : 'none';
+  // Set parent hero logo
+  const phl = document.getElementById('parent-hero-logo');
+  if (phl) phl.src = document.getElementById('hero-logo-img').src;
   renderDashboard();
-  showPage('dashboard');
+  if (user.role === 'parent') { showPage('parent'); }
+  else { showPage('dashboard'); }
 }
 
 // doLogout replaced by doFirebaseLogout (Firebase Auth)
@@ -1491,7 +1805,8 @@ function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
 // ═══════════════════════════════════════════════
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-'+name).classList.add('active');
+  const pg = document.getElementById('page-'+name);
+  if (pg) pg.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page===name));
   if (name==='dashboard') renderDashboard();
   if (name==='materials') renderMaterials();
@@ -1510,6 +1825,8 @@ function showPage(name) {
   if (name==='qa') renderQA();
   if (name==='leaderboard') { renderLeaderboard(); renderNotes(); }
   if (name==='schedule') renderSchedule();
+  if (name==='analytics') renderAnalytics();
+  if (name==='parent') renderParentPortal();
 }
 
 // ═══════════════════════════════════════════════
@@ -1898,6 +2215,7 @@ function renderAdminTable() {
           <select onchange="changeRole('${u.id}',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:7px;font-size:0.8rem;font-family:inherit;cursor:pointer;background:white;color:var(--text)">
             <option value="student" ${u.role==='student'?'selected':''}>🎓 Student</option>
             <option value="admin" ${u.role==='admin'?'selected':''}>🛡 Admin</option>
+            <option value="parent" ${u.role==='parent'?'selected':''}>👨‍👩‍👧 Parent</option>
           </select>` : `<span class="role-badge role-${u.role}">${u.role}</span>`}
           <button class="btn btn-secondary btn-sm" onclick="openAssignClassroom(${u.id})" style="white-space:nowrap">🏫 ${cls ? esc(cls.name) : 'Assign Class'}</button>
           ${u.status==='active'
@@ -2504,70 +2822,56 @@ function fileColor(type) {
 //  AI TUTOR
 // ═══════════════════════════════════════════════
 
-const TUTOR_SYSTEM_PROMPT = `You are MOHRA, an expert AI Math Tutor for MOHRA Math Academy — a professional Egyptian math tutoring center run by Mr. Hazem Mohra.
+const TUTOR_SYSTEM_PROMPT = `You are MOHRA Assistant — the AI Math Tutor for MOHRA Math Academy, run by the distinguished Egyptian educator Mr. Hazem Mohra.
 
-## YOUR IDENTITY
-- Name: MOHRA Tutor
-- Personality: Strict but warm, encouraging, like a brilliant Egyptian math teacher who genuinely cares about every student succeeding
-- Language: Respond in the same language the student uses (Arabic or English). If mixed, mirror their mix.
-- Tone: Direct, clear, never condescending. Celebrate correct answers genuinely. Be firm but kind on wrong ones.
+## IDENTITY & PERSONA
+- Name: MOHRA Assistant
+- Voice: Professional, warm, and mentor-like. Think of a wise, encouraging Egyptian math professor who genuinely cares.
+- Language: Mirror the student's language (Arabic or English). If mixed, mirror the mix.
+- Typography note: Write with precision and clarity — students deserve clear, well-structured guidance.
 
-## YOUR CORE MISSION
-You have TWO modes:
+## THE IRON LAW — STRICT SOCRATIC PROTOCOL
+**You are FORBIDDEN from providing the final answer to any math problem.**
 
-### MODE 1 — FREE TUTORING (student asks a math question)
-When a student asks a math question:
-1. NEVER just give the answer directly for non-trivial problems
-2. Use the Socratic method: guide them step-by-step with hints
-3. Ask "What do you think the first step is?" to engage them
-4. If they're stuck after 2 attempts, show a worked example of a SIMILAR (not identical) problem, then ask them to solve theirs
-5. When they get it right, explain WHY it works, not just THAT it works
-6. Connect concepts: "This is the same idea as..." to build deeper understanding
+If a student directly asks "What is the answer?" or "Just tell me the answer" or similar, you MUST respond:
+> "Mr. Hazem wants us to find the logic together. What is the first step you'd take to isolate x?" (adapt to the specific problem)
 
-### MODE 2 — HOMEWORK CHECKING (student submits answers)
-When you receive homework answers to check (format: "Q1: [question] → [answer]" or similar):
+This rule has NO exceptions. Not for time pressure, not for frustration, not for any reason.
 
-STRICT GRADING RULES:
-1. Check EVERY answer mathematically — do not accept approximate answers unless the problem asks for estimation
-2. For each answer, respond with one of:
-   - ✅ CORRECT: "[brief praise]"
-   - ❌ WRONG: Do NOT give the correct answer. Instead:
-     a) Explain exactly what mistake was made (conceptual error? calculation slip? wrong formula?)
-     b) Give a clear step-by-step explanation of HOW to approach this type of problem
-     c) End with: "🔄 Now try again — send me your new answer for this question."
-3. After checking all answers, show a summary:
-   - Score: X/Y correct
-   - List which questions need retry
-   - Motivational message based on score
+## HOW YOU GUIDE (Socratic Method)
+1. **Identify the first obstacle** — Where is the student stuck? What concept do they misunderstand?
+2. **Ask the right question** — Guide them to the next step with a question, not a statement.
+3. **Hint on sign errors** — If you detect a sign error (e.g., wrong +/−), point to it specifically: "Check the sign when you moved this term to the other side — what happens to a positive term when it crosses the equals sign?"
+4. **Explain via analogy** — If teaching a concept like the Distributive Property, use a concrete real-world analogy: "Imagine you're buying 3 bags, each containing apples AND oranges. You distribute the 3 to everything inside the bag."
+5. **Celebrate progress** — When a student takes the right step, acknowledge it specifically: "Excellent! Dividing both sides by 4 was exactly right. Now what does that give you?"
+6. **After 3 failed attempts at the same step** — Show a worked example of a SIMILAR (not identical) problem, then ask them to apply the same logic to theirs. Also flag this to the oversight system by including: [STRUGGLE_FLAG: topic_name]
 
-HOMEWORK RETRY RULES:
-- When a student sends a retry answer, check it immediately
-- If still wrong: explain differently, use a different approach or analogy
-- If correct on retry: celebrate and note "Much better! You got there 💪"
-- NEVER move on or ignore a wrong answer — keep pushing until they solve it correctly
-- Track which questions are still pending in each message
+## STRUGGLE DETECTION (Internal)
+After a student fails the SAME step 3 times, include this invisible tag in your response:
+[STRUGGLE_FLAG: algebra] (or trigonometry, geometry, calculus, etc.)
 
-## MATH TOPICS YOU COVER
-Algebra, Geometry, Trigonometry, Calculus, Statistics, Number Theory, Egyptian curriculum (Thanaweya Amma, Preparatory), and competition math.
+After a student masters a concept, include:
+[MASTERED: linear_equations] (or whatever topic)
 
-## FORMATTING RULES
-- Use clear mathematical notation: write fractions as a/b, powers as x², use → for steps
-- Number your steps: Step 1, Step 2...
-- Put final answers in a box: 【Answer: X】
-- Use emojis sparingly but effectively (✅ ❌ 💡 🔄 💪 📐)
-- Keep responses focused — no unnecessary padding
+## HOMEWORK CHECKING MODE
+When student submits homework answers:
+1. Grade each answer precisely
+2. ✅ CORRECT: Short specific praise
+3. ❌ WRONG: Never give the answer. Explain the specific mistake, then guide Socratically.
+4. Use retry protocol — track pending questions
+5. Show score summary at end
 
-## WHAT YOU NEVER DO
-- Never give away homework answers directly when checking (students must earn the correct answer)
-- Never be sarcastic or make a student feel stupid
-- Never skip explaining WHY, only HOW
-- Never accept "close enough" on homework checks
-- Never discuss topics unrelated to mathematics or this academy
+## FORMATTING
+- Use Step 1, Step 2... for guidance
+- Use 【Answer: X】 for confirmed correct final answers (only after student gets it right)
+- Emojis: ✅ ❌ 💡 📐 🔄 — used sparingly
+- No padding, no unnecessary words — Mr. Hazem values clarity
 
-## RESPONSE LANGUAGE
-- If the student writes in Arabic → respond fully in Arabic
-- If the student writes in English → respond fully in English
-- Mathematical notation stays the same in both languages`;
+## ABSOLUTE LIMITS
+- NEVER give away the final answer
+- NEVER discuss topics outside mathematics and this academy
+- NEVER be condescending — every wrong answer is a learning opportunity
+- NEVER skip the WHY, only the HOW`;
 
 // Tutor state
 var tutorMessages = []; // {role, content}
@@ -2579,8 +2883,8 @@ window._tutorApiKey = ''; // loaded from Firestore on login
 async function loadTutorApiKey() {
   try {
     const doc = await fsGet('meta', 'settings');
-    if (doc && doc.anthropicKey) {
-      window._tutorApiKey = doc.anthropicKey;
+    if (doc && doc.geminiKey) {
+      window._tutorApiKey = doc.geminiKey;
       updateTutorKeyStatus(true);
     } else {
       updateTutorKeyStatus(false);
@@ -2603,17 +2907,17 @@ function updateTutorKeyStatus(hasKey) {
 async function saveAiApiKey() {
   const input = document.getElementById('ai-key-input');
   const key = input.value.trim();
-  if (!key || !key.startsWith('sk-ant-')) {
-    toast('Invalid key — must start with sk-ant-', 'error'); return;
+  if (!key || !key.startsWith('AIza')) {
+    toast('Invalid key — Gemini keys start with AIza', 'error'); return;
   }
   const btn = document.getElementById('ai-key-save-btn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await window._fbSaveDoc('meta', 'settings', { anthropicKey: key });
+    await window._fbSaveDoc('meta', 'settings', { geminiKey: key });
     window._tutorApiKey = key;
     updateTutorKeyStatus(true);
     input.value = '';
-    toast('✅ API key saved! All students can now use the AI Tutor.', 'success');
+    toast('✅ Gemini API key saved! All students can now use the AI Tutor.', 'success');
   } catch(e) {
     toast('Failed to save key. Check your connection.', 'error');
   }
@@ -2623,7 +2927,7 @@ async function saveAiApiKey() {
 async function removeAiApiKey() {
   if (!confirm('Remove the AI Tutor API key? Students will lose access.')) return;
   try {
-    await window._fbSaveDoc('meta', 'settings', { anthropicKey: '' });
+    await window._fbSaveDoc('meta', 'settings', { geminiKey: '' });
     window._tutorApiKey = '';
     updateTutorKeyStatus(false);
     toast('API key removed.', 'warn');
@@ -2723,8 +3027,8 @@ async function sendTutorMessage() {
   showTypingIndicator();
 
   // Get API key from Firestore (set by founder in Admin panel)
-  const anthropicKey = window._tutorApiKey || '';
-  if (!anthropicKey) {
+  const geminiKey = window._tutorApiKey || '';
+  if (!geminiKey) {
     appendTutorMsg('ai', '🔑 The AI Tutor is not configured yet. Please ask <strong>Mr. Hazem Mohra</strong> to set the API key in the Admin Panel → AI Tutor Settings.', 'bubble-explain');
     tutorIsTyping = false;
     document.getElementById('tutor-send-btn').disabled = false;
@@ -2732,28 +3036,31 @@ async function sendTutorMessage() {
   }
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey.trim(),
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-allow-browser': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: TUTOR_SYSTEM_PROMPT,
-        messages: tutorMessages
-      })
-    });
+    // Convert message history to Gemini format
+    const geminiContents = tutorMessages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey.trim()}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: TUTOR_SYSTEM_PROMPT }] },
+          contents: geminiContents,
+          generationConfig: { maxOutputTokens: 1000, temperature: 0.7 }
+        })
+      }
+    );
 
     const data = await resp.json();
     removeTypingIndicator();
 
     if (data.error) {
       const errMsg = data.error.message || 'Something went wrong.';
-      if (data.error.type === 'authentication_error' || errMsg.includes('API key') || errMsg.includes('auth')) {
+      if (data.error.code === 400 || data.error.code === 403) {
         window._tutorApiKey = '';
         appendTutorMsg('ai', '🔑 Invalid API key. Please ask Mr. Hazem Mohra to update it in Admin Panel → AI Tutor Settings.', 'bubble-wrong');
       } else {
@@ -2764,7 +3071,7 @@ async function sendTutorMessage() {
       return;
     }
 
-    const reply = data.content.map(b => b.text || '').join('');
+    const reply = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '⚠️ Empty response from Gemini.';
     tutorMessages.push({ role: 'assistant', content: reply });
 
     // Detect correct/wrong/explain for styling
@@ -2813,6 +3120,430 @@ async function sendTutorMessage() {
   tutorIsTyping = false;
   document.getElementById('tutor-send-btn').disabled = false;
   document.getElementById('tutor-input').focus();
+}
+
+// ═══════════════════════════════════════════════
+//  FLOATING CHAT BUBBLE (Socratic Tutor)
+// ═══════════════════════════════════════════════
+var floatMsgs = [];
+var floatTyping = false;
+var floatStruggleCount = {};
+
+function toggleFloatPanel() {
+  const panel = document.getElementById('tutor-float-panel');
+  const badge = document.getElementById('tutor-float-badge');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    badge.style.display = 'none';
+    badge.textContent = '';
+    document.getElementById('float-input').focus();
+  }
+}
+
+function appendFloatMsg(role, html, isSocratic) {
+  const box = document.getElementById('float-msgs');
+  const isUser = role === 'user';
+  const name = isUser ? (state.currentUser?.name?.split(' ')[0] || 'You') : '🎓';
+  const div = document.createElement('div');
+  div.className = 'float-msg ' + (isUser ? 'float-user' : 'float-ai');
+  div.innerHTML = `<div class="float-avatar-sm">${isUser ? name.charAt(0).toUpperCase() : '🎓'}</div>
+    <div class="float-bubble${isSocratic ? ' socratic' : ''}">${html}</div>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendFloatMessage() {
+  const input = document.getElementById('float-input');
+  const text = input.value.trim();
+  if (!text || floatTyping) return;
+  input.value = '';
+  floatTyping = true;
+
+  appendFloatMsg('user', text.replace(/\n/g,'<br>'));
+  floatMsgs.push({ role: 'user', content: text });
+
+  // Typing indicator
+  const box = document.getElementById('float-msgs');
+  const typingDiv = document.createElement('div');
+  typingDiv.id = 'float-typing';
+  typingDiv.className = 'float-msg float-ai';
+  typingDiv.innerHTML = `<div class="float-avatar-sm">🎓</div>
+    <div class="float-bubble"><div class="tutor-typing"><span></span><span></span><span></span></div></div>`;
+  box.appendChild(typingDiv);
+  box.scrollTop = box.scrollHeight;
+
+  const key = window._tutorApiKey || '';
+  if (!key) {
+    typingDiv.remove();
+    appendFloatMsg('ai', '🔑 Please ask <strong>Mr. Hazem</strong> to configure the AI key in the Admin Panel.', true);
+    floatTyping = false;
+    return;
+  }
+
+  try {
+    // Convert to Gemini format
+    const geminiContents = floatMsgs.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key.trim()}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: TUTOR_SYSTEM_PROMPT }] },
+          contents: geminiContents,
+          generationConfig: { maxOutputTokens: 800, temperature: 0.7 }
+        })
+      }
+    );
+    const data = await resp.json();
+    typingDiv.remove();
+
+    if (data.error) {
+      appendFloatMsg('ai', '⚠️ ' + (data.error.message || 'Error occurred.'), false);
+      floatTyping = false;
+      return;
+    }
+
+    const reply = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '⚠️ Empty response.';
+    floatMsgs.push({ role: 'assistant', content: reply });
+
+    // Detect struggle flag and save to Firestore
+    const struggleMatch = reply.match(/\[STRUGGLE_FLAG:\s*([^\]]+)\]/i);
+    const masteredMatch = reply.match(/\[MASTERED:\s*([^\]]+)\]/i);
+    const uid = state.currentUser?.id;
+
+    if (uid) {
+      // Track struggle counts per topic
+      if (struggleMatch) {
+        const topic = struggleMatch[1].trim();
+        floatStruggleCount[topic] = (floatStruggleCount[topic] || 0) + 1;
+      }
+      // Save chat session to Firestore
+      const chatData = {
+        studentId: uid,
+        studentName: state.currentUser.name,
+        messages: floatMsgs.slice(-20), // last 20 msgs
+        struggleCount: floatStruggleCount,
+        lastTopic: struggleMatch ? struggleMatch[1].trim() : (masteredMatch ? masteredMatch[1].trim() : ''),
+        hasStruggle: Object.values(floatStruggleCount).some(v => v >= 3),
+        isMastered: !!masteredMatch,
+        masteredTopic: masteredMatch ? masteredMatch[1].trim() : '',
+        updatedAt: new Date().toISOString()
+      };
+      window._fbSaveDoc && window._fbSaveDoc('chats', uid, chatData);
+    }
+
+    // Clean reply of internal tags
+    const cleanReply = reply
+      .replace(/\[STRUGGLE_FLAG:[^\]]*\]/gi, '')
+      .replace(/\[MASTERED:[^\]]*\]/gi, '')
+      .replace(/\n/g,'<br>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/【(.*?)】/g, '<span style="background:var(--navy);color:white;padding:2px 8px;border-radius:5px;font-weight:700;">$1</span>');
+
+    const isSocratic = cleanReply.toLowerCase().includes('mr. hazem') || cleanReply.includes('first step') || cleanReply.includes('💡');
+    appendFloatMsg('ai', cleanReply, isSocratic);
+
+    // Show badge if panel is closed
+    const panel = document.getElementById('tutor-float-panel');
+    if (!panel.classList.contains('open')) {
+      const badge = document.getElementById('tutor-float-badge');
+      badge.style.display = 'flex';
+      badge.textContent = '+1';
+    }
+
+  } catch(e) {
+    document.getElementById('float-typing')?.remove();
+    appendFloatMsg('ai', '⚠️ Connection error. Check your internet.', false);
+  }
+  floatTyping = false;
+}
+
+// ═══════════════════════════════════════════════
+//  HAZEM OVERSIGHT DASHBOARD
+// ═══════════════════════════════════════════════
+var oversightActive = false;
+var oversightInterval = null;
+
+function toggleOversight(on) {
+  oversightActive = on;
+  const panel = document.getElementById('oversight-panel');
+  panel.style.display = on ? 'block' : 'none';
+  if (on) {
+    refreshOversight();
+    oversightInterval = setInterval(refreshOversight, 8000); // refresh every 8s
+  } else {
+    if (oversightInterval) clearInterval(oversightInterval);
+  }
+}
+
+async function refreshOversight() {
+  if (!oversightActive) return;
+  try {
+    const chatDocs = await fsList('chats');
+    const container = document.getElementById('oversight-students');
+    if (!chatDocs.length) {
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">🎓</div><h3>No active AI sessions</h3><p>Students will appear here when they use the AI Tutor</p></div>`;
+      return;
+    }
+
+    // Sort: struggle first
+    chatDocs.sort((a,b) => (b.hasStruggle ? 1 : 0) - (a.hasStruggle ? 1 : 0));
+
+    container.innerHTML = chatDocs.map(chat => {
+      const topic = chat.hasStruggle
+        ? `<span class="topic-tag">⚠️ Struggling: ${chat.lastTopic || 'Math'}</span>`
+        : chat.isMastered
+        ? `<span class="topic-tag mastered">✅ Mastered: ${chat.masteredTopic || chat.lastTopic || 'Concept'}</span>`
+        : `<span class="topic-tag">📚 Topic: ${chat.lastTopic || 'General Math'}</span>`;
+
+      const flag = chat.hasStruggle ? `<span class="struggle-flag" title="Struggling — 3+ failed attempts">🚩</span>` : '';
+      const initials = (chat.studentName || 'S').split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+      const timeAgo = chat.updatedAt ? timeSince(new Date(chat.updatedAt)) : 'recently';
+
+      return `<div class="oversight-student-card ${chat.hasStruggle ? 'has-flag' : ''}" onclick="viewTranscript('${chat.studentId}', ${JSON.stringify(chat.studentName).replace(/'/g,"&#39;")})">
+        <div class="oversight-avatar">${initials}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;color:var(--navy);font-size:0.92rem">${chat.studentName || 'Unknown Student'}</div>
+          <div style="font-size:0.75rem;color:var(--subtext);margin-top:2px">Active ${timeAgo}</div>
+          <div style="margin-top:6px">${topic}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+          <div class="live-dot"></div>
+          ${flag}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    console.log('Oversight refresh error', e);
+  }
+}
+
+async function viewTranscript(studentId, studentName) {
+  const modal = document.getElementById('transcript-modal');
+  const content = document.getElementById('transcript-content');
+  const title = document.getElementById('transcript-title');
+  title.textContent = `💬 ${studentName} — Live Chat Transcript`;
+  content.innerHTML = `<div class="empty-state" style="padding:20px"><div class="empty-icon">⏳</div><h3>Loading...</h3></div>`;
+  modal.classList.add('open');
+
+  try {
+    const chat = await fsGet('chats', studentId);
+    if (!chat || !chat.messages) {
+      content.innerHTML = '<p style="color:var(--subtext)">No chat history found.</p>';
+      return;
+    }
+    const msgs = Array.isArray(chat.messages) ? chat.messages : [];
+    content.innerHTML = msgs.map(m => {
+      const isUser = m.role === 'user';
+      const cleanText = (m.content || '').replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+      return `<div style="margin-bottom:14px;display:flex;gap:10px;${isUser ? 'flex-direction:row-reverse' : ''}">
+        <div style="width:28px;height:28px;border-radius:50%;background:${isUser ? 'var(--navy)' : '#e8eaf6'};color:${isUser ? 'white' : 'var(--navy)'};display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;flex-shrink:0">${isUser ? '👤' : '🎓'}</div>
+        <div style="max-width:80%;padding:9px 13px;border-radius:12px;font-size:0.85rem;line-height:1.55;background:${isUser ? 'var(--navy)' : '#f4f2ff'};color:${isUser ? 'white' : 'var(--navy)'};border:1px solid ${isUser ? 'transparent' : '#e0ddf5'}">${cleanText}</div>
+      </div>`;
+    }).join('') || '<p style="color:var(--subtext)">Empty conversation.</p>';
+  } catch(e) {
+    content.innerHTML = '<p style="color:var(--danger)">Failed to load transcript.</p>';
+  }
+}
+
+function closeTranscript() {
+  document.getElementById('transcript-modal').classList.remove('open');
+}
+
+function timeSince(date) {
+  const secs = Math.floor((new Date() - date) / 1000);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return Math.floor(secs/60) + 'm ago';
+  return Math.floor(secs/3600) + 'h ago';
+}
+
+// ═══════════════════════════════════════════════
+//  ANALYTICS DASHBOARD
+// ═══════════════════════════════════════════════
+function renderAnalytics() {
+  const container = document.getElementById('analytics-content');
+  if (!container) return;
+
+  const students = state.users.filter(u => u.role === 'student');
+  const grades = state.grades || [];
+
+  if (!students.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">📊</div><h3>No student data yet</h3></div>`;
+    return;
+  }
+
+  // Compute per-student averages
+  const studentStats = students.map(s => {
+    const sg = grades.filter(g => g.studentId == s.id || g.student == s.name);
+    const avg = sg.length ? Math.round(sg.reduce((sum,g) => sum + (Number(g.score)/Number(g.outOf||100)*100), 0) / sg.length) : null;
+    return { ...s, avg, gradeCount: sg.length };
+  }).sort((a,b) => (b.avg||0) - (a.avg||0));
+
+  const withGrades = studentStats.filter(s => s.avg !== null);
+  const classAvg = withGrades.length ? Math.round(withGrades.reduce((s,x)=>s+x.avg,0)/withGrades.length) : 0;
+  const topPerformers = studentStats.filter(s => s.avg >= 85).length;
+  const needsAttention = studentStats.filter(s => s.avg !== null && s.avg < 60).length;
+
+  container.innerHTML = `
+    <div class="analytics-grid">
+      <div class="analytics-card">
+        <div class="analytics-card-title">🏫 Class Overview</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+          <div style="background:var(--bg);border-radius:10px;padding:14px;text-align:center">
+            <div style="font-size:1.8rem;font-weight:800;color:var(--navy);font-family:'Playfair Display',serif">${classAvg}%</div>
+            <div style="font-size:0.72rem;color:var(--subtext);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Class Avg</div>
+          </div>
+          <div style="background:var(--bg);border-radius:10px;padding:14px;text-align:center">
+            <div style="font-size:1.8rem;font-weight:800;color:var(--navy);font-family:'Playfair Display',serif">${students.length}</div>
+            <div style="font-size:0.72rem;color:var(--subtext);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Students</div>
+          </div>
+          <div style="background:#e8f5e9;border-radius:10px;padding:14px;text-align:center">
+            <div style="font-size:1.8rem;font-weight:800;color:#2e7d32;font-family:'Playfair Display',serif">${topPerformers}</div>
+            <div style="font-size:0.72rem;color:#388e3c;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Top (≥85%)</div>
+          </div>
+          <div style="background:#fdecea;border-radius:10px;padding:14px;text-align:center">
+            <div style="font-size:1.8rem;font-weight:800;color:#c62828;font-family:'Playfair Display',serif">${needsAttention}</div>
+            <div style="font-size:0.72rem;color:#c62828;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Needs Help (&lt;60%)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="analytics-card">
+        <div class="analytics-card-title">🏆 Top Performers</div>
+        ${studentStats.slice(0,5).map((s,i) => `
+          <div class="mini-bar-wrap">
+            <div class="mini-bar-label"><span>${i===0?'🥇 ':i===1?'🥈 ':i===2?'🥉 ':''}${s.name}</span><span style="font-weight:700;color:var(--navy)">${s.avg !== null ? s.avg+'%' : '—'}</span></div>
+            <div class="mini-bar-track"><div class="mini-bar-fill ${s.avg>=85?'green':s.avg>=60?'':''}" style="width:${s.avg||0}%"></div></div>
+          </div>`).join('')}
+      </div>
+
+      <div class="analytics-card">
+        <div class="analytics-card-title">⚠️ Students Needing Attention</div>
+        ${studentStats.filter(s=>s.avg!==null&&s.avg<70).length ? studentStats.filter(s=>s.avg!==null&&s.avg<70).map(s=>`
+          <div class="mini-bar-wrap">
+            <div class="mini-bar-label"><span>${s.name}</span><span style="font-weight:700;color:${s.avg<60?'#c62828':'#e65100'}">${s.avg}%</span></div>
+            <div class="mini-bar-track"><div class="mini-bar-fill red" style="width:${s.avg}%"></div></div>
+          </div>`).join('') : '<div style="color:var(--subtext);font-size:0.88rem;padding:12px 0">🎉 All students are performing well!</div>'}
+      </div>
+    </div>
+
+    <div class="analytics-card">
+      <div class="analytics-card-title">📋 Full Grade Report</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Student</th><th>Grades Recorded</th><th>Average</th><th>Performance</th></tr></thead>
+          <tbody>
+            ${studentStats.map(s => {
+              const perf = s.avg === null ? '—' : s.avg >= 85 ? '🌟 Excellent' : s.avg >= 70 ? '✅ Good' : s.avg >= 60 ? '⚡ Average' : '⚠️ Needs Help';
+              const color = s.avg === null ? 'var(--subtext)' : s.avg >= 85 ? '#2e7d32' : s.avg >= 70 ? 'var(--navy)' : s.avg >= 60 ? '#e65100' : '#c62828';
+              return `<tr>
+                <td><strong>${s.name}</strong></td>
+                <td>${s.gradeCount}</td>
+                <td style="font-weight:700;color:${color}">${s.avg !== null ? s.avg+'%' : '—'}</td>
+                <td>${perf}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════
+//  PARENT PORTAL
+// ═══════════════════════════════════════════════
+function renderParentPortal() {
+  const container = document.getElementById('parent-content');
+  if (!container) return;
+
+  const cu = state.currentUser;
+  if (!cu || cu.role !== 'parent') {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h3>Parent access only</h3></div>`;
+    return;
+  }
+
+  // Find linked children (students where parentId matches this parent's id or email)
+  const children = state.users.filter(u =>
+    u.role === 'student' && (u.parentId === cu.id || u.parentEmail === cu.email)
+  );
+
+  if (!children.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">👨‍👩‍👧</div>
+        <h3>No linked students yet</h3>
+        <p>Ask Mr. Hazem to link your account to your child's profile.</p>
+        <p style="margin-top:8px;font-size:0.85rem;color:var(--subtext)">📞 01225797820</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = children.map(child => {
+    const childGrades = (state.grades||[]).filter(g => g.studentId == child.id || g.student == child.name);
+    const avg = childGrades.length
+      ? Math.round(childGrades.reduce((s,g) => s + (Number(g.score)/Number(g.outOf||100)*100), 0) / childGrades.length)
+      : null;
+
+    const childHW = (state.homework||[]).filter(h => h.classroomId === child.classroomId || h.classroomId === 'all');
+    const openHW = childHW.filter(h => h.status === 'open');
+
+    const recentGrades = childGrades.slice(-5).reverse();
+    const perfLabel = avg === null ? 'No grades yet' : avg >= 85 ? '🌟 Excellent' : avg >= 70 ? '✅ Good' : avg >= 60 ? '⚡ Average' : '⚠️ Needs improvement';
+    const classroom = (state.classrooms||[]).find(c => c.id == child.classroomId);
+
+    return `<div class="parent-child-card">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+        <div style="width:56px;height:56px;border-radius:50%;background:var(--navy);color:white;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:700;flex-shrink:0">${child.name.charAt(0).toUpperCase()}</div>
+        <div style="flex:1">
+          <div class="parent-child-name">${child.name}</div>
+          <div style="font-size:0.82rem;color:var(--subtext);margin-top:2px">${classroom ? classroom.name : 'No classroom assigned'}</div>
+        </div>
+        <div class="parent-grade-pill">${avg !== null ? avg+'%' : '—'} <span style="color:var(--subtext);font-weight:400">avg</span></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+        <div style="background:white;border-radius:10px;padding:12px;text-align:center">
+          <div style="font-size:1.5rem;font-weight:800;color:var(--navy);font-family:'Playfair Display',serif">${childGrades.length}</div>
+          <div style="font-size:0.72rem;color:var(--subtext);font-weight:600;text-transform:uppercase">Grades on Record</div>
+        </div>
+        <div style="background:white;border-radius:10px;padding:12px;text-align:center">
+          <div style="font-size:1.5rem;font-weight:800;color:${openHW.length?'#e65100':'#2e7d32'};font-family:'Playfair Display',serif">${openHW.length}</div>
+          <div style="font-size:0.72rem;color:var(--subtext);font-weight:600;text-transform:uppercase">Open Assignments</div>
+        </div>
+        <div style="background:white;border-radius:10px;padding:12px;text-align:center">
+          <div style="font-size:0.95rem;font-weight:700;color:var(--navy)">${perfLabel}</div>
+          <div style="font-size:0.72rem;color:var(--subtext);font-weight:600;text-transform:uppercase">Performance</div>
+        </div>
+      </div>
+
+      ${recentGrades.length ? `
+        <div>
+          <div style="font-weight:700;color:var(--navy);font-size:0.85rem;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Recent Grades</div>
+          ${recentGrades.map(g => {
+            const pct = Math.round(Number(g.score)/Number(g.outOf||100)*100);
+            return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+              <div style="flex:1;font-size:0.85rem;color:var(--text)">${g.subject||'Exam'}</div>
+              <div style="font-weight:700;font-size:0.88rem;color:${pct>=85?'#2e7d32':pct>=60?'var(--navy)':'#c62828'}">${g.score}/${g.outOf||100} (${pct}%)</div>
+            </div>`;
+          }).join('')}
+        </div>` : ''}
+
+      ${openHW.length ? `
+        <div style="margin-top:12px">
+          <div style="font-weight:700;color:#e65100;font-size:0.85rem;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">📋 Open Assignments</div>
+          ${openHW.slice(0,3).map(h => `
+            <div style="background:white;border-radius:8px;padding:10px 12px;margin-bottom:6px;border-left:3px solid #ffa726">
+              <div style="font-weight:600;font-size:0.85rem;color:var(--navy)">${h.title}</div>
+              ${h.due ? `<div style="font-size:0.75rem;color:var(--subtext);margin-top:2px">Due: ${h.due}</div>` : ''}
+            </div>`).join('')}
+        </div>` : ''}
+    </div>`;
+  }).join('');
 }
 </script>
 <div class="modal-overlay" id="modal-classroom">
@@ -2966,5 +3697,4 @@ async function sendTutorMessage() {
 
 </body>
 </html>
-
 
