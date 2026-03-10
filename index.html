@@ -14,6 +14,11 @@ const FB_PROJECT  = "mohra-math-academy";
 const FB_AUTH_URL = "https://identitytoolkit.googleapis.com/v1/accounts";
 const FB_DB_URL   = "https://firestore.googleapis.com/v1/projects/" + FB_PROJECT + "/databases/(default)/documents";
 
+// Wrapper that adds referrer-no-policy to avoid CORS issues with API key restrictions
+async function fbFetch(url, options) {
+  return fetch(url, { ...options, referrerPolicy: 'no-referrer' });
+}
+
 var fbIdToken = null;
 var fbUserId  = null;
 var fbRefreshToken = null;
@@ -60,7 +65,7 @@ function toFsDoc(obj) {
 
 // ── Firestore REST calls ────────────────────────
 async function fsGet(col, id) {
-  const res = await fetch(FB_DB_URL + '/' + col + '/' + id, {
+  const res = await fbFetch(FB_DB_URL + '/' + col + '/' + id, {
     headers: fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}
   });
   if (!res.ok) return null;
@@ -70,12 +75,12 @@ async function fsGet(col, id) {
 
 async function fsSet(col, id, data) {
   const body = JSON.stringify(toFsDoc(data));
-  const res = await fetch(FB_DB_URL + '/' + col + '/' + id + '?currentDocument.exists=false', {
+  const res = await fbFetch(FB_DB_URL + '/' + col + '/' + id + '?currentDocument.exists=false', {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...(fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}) }, body
   });
   if (!res.ok) {
     // Document exists, use PATCH
-    const res2 = await fetch(FB_DB_URL + '/' + col + '/' + id, {
+    const res2 = await fbFetch(FB_DB_URL + '/' + col + '/' + id, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}) }, body
     });
     return res2.ok;
@@ -84,13 +89,13 @@ async function fsSet(col, id, data) {
 }
 
 async function fsDelete(col, id) {
-  await fetch(FB_DB_URL + '/' + col + '/' + id, {
+  await fbFetch(FB_DB_URL + '/' + col + '/' + id, {
     method: 'DELETE', headers: fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}
   });
 }
 
 async function fsList(col) {
-  const res = await fetch(FB_DB_URL + '/' + col + '?pageSize=500', {
+  const res = await fbFetch(FB_DB_URL + '/' + col + '?pageSize=500', {
     headers: fbIdToken ? { Authorization: 'Bearer ' + fbIdToken } : {}
   });
   if (!res.ok) return [];
@@ -137,7 +142,7 @@ window._fbLoadAllData = loadAllData;
 async function refreshToken() {
   if (!fbRefreshToken) return false;
   try {
-    const res = await fetch('https://securetoken.googleapis.com/v1/token?key=' + FB_API_KEY, {
+    const res = await fbFetch('https://securetoken.googleapis.com/v1/token?key=' + FB_API_KEY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: fbRefreshToken })
@@ -168,6 +173,8 @@ function setAuthLoading(on) {
 }
 
 function saveSession(uid, idToken, refreshTok) {
+  const remember = document.getElementById('remember-me-check');
+  if (remember && !remember.checked) return; // don't save if unchecked
   try { localStorage.setItem('mohra_session', JSON.stringify({ uid, idToken, refreshTok })); } catch(e) {}
 }
 
@@ -186,6 +193,7 @@ async function restoreSession() {
     const userData = await fsGet('users', uid);
     if (!userData || userData.status === 'banned') { clearSession(); return false; }
     await loadAllData();
+    await loadTutorApiKey();
     loginAs({ ...userData, uid, id: uid });
     return true;
   } catch(e) { clearSession(); return false; }
@@ -196,14 +204,14 @@ async function ensureFounderExists() {
     const users = await fsList('users');
     if (users.some(u => u.role === 'founder')) return;
     // Create founder via Auth REST
-    const res = await fetch(FB_AUTH_URL + ':signUp?key=' + FB_API_KEY, {
+    const res = await fbFetch(FB_AUTH_URL + ':signUp?key=' + FB_API_KEY, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'hazemmohra986@gmail.com', password: 'mohra2026', returnSecureToken: true })
     });
     const data = await res.json();
     if (data.error) {
       // Account exists, sign in to get UID
-      const res2 = await fetch(FB_AUTH_URL + ':signInWithPassword?key=' + FB_API_KEY, {
+      const res2 = await fbFetch(FB_AUTH_URL + ':signInWithPassword?key=' + FB_API_KEY, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: 'hazemmohra986@gmail.com', password: 'mohra2026', returnSecureToken: true })
       });
@@ -233,7 +241,7 @@ window.doFirebaseLogin = async function() {
   if (!email || !pass) { showLoginError('Please enter your email and password.'); return; }
   setAuthLoading(true);
   try {
-    const res = await fetch(FB_AUTH_URL + ':signInWithPassword?key=' + FB_API_KEY, {
+    const res = await fbFetch(FB_AUTH_URL + ':signInWithPassword?key=' + FB_API_KEY, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password: pass, returnSecureToken: true })
     });
@@ -259,10 +267,11 @@ window.doFirebaseLogin = async function() {
     if (!userData) { showLoginError('Account not found. Contact the admin.'); setAuthLoading(false); return; }
     if (userData.status === 'banned') { clearSession(); showLoginError('Your account has been banned.'); setAuthLoading(false); return; }
     await loadAllData();
+    await loadTutorApiKey();
     loginAs({ ...userData, uid: fbUserId, id: fbUserId });
   } catch(e) {
     setAuthLoading(false);
-    showLoginError('Login failed. Check your internet connection.');
+    showLoginError('Login failed: ' + (e && e.message ? e.message : String(e)));
   }
 };
 
@@ -279,7 +288,7 @@ window.doForgotPassword = async function() {
   const email = document.getElementById('login-email').value.trim();
   if (!email) { showLoginError('Enter your email first.'); return; }
   try {
-    const res = await fetch(FB_AUTH_URL + ':sendOobCode?key=' + FB_API_KEY, {
+    const res = await fbFetch(FB_AUTH_URL + ':sendOobCode?key=' + FB_API_KEY, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestType: 'PASSWORD_RESET', email })
     });
@@ -302,7 +311,7 @@ window.doCreateFirebaseAccount = async function() {
   if (!name || !email || !password) { showErr(err, 'All fields required.'); return; }
   if (password.length < 6) { showErr(err, 'Password must be at least 6 characters.'); return; }
   try {
-    const res = await fetch(FB_AUTH_URL + ':signUp?key=' + FB_API_KEY, {
+    const res = await fbFetch(FB_AUTH_URL + ':signUp?key=' + FB_API_KEY, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, returnSecureToken: true })
     });
@@ -701,6 +710,25 @@ label[for="remember-me"]:hover { color:var(--navy); }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--sky); }
+
+/* ── AI TUTOR ── */
+.tutor-msg { display:flex; gap:10px; align-items:flex-start; animation: fadeInUp 0.3s ease; }
+.tutor-msg.tutor-user { flex-direction:row-reverse; }
+.tutor-avatar { width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;background:var(--light); }
+.tutor-msg.tutor-user .tutor-avatar { background:var(--navy);color:white;font-size:0.75rem;font-weight:700; }
+.tutor-bubble { max-width:80%;padding:12px 16px;border-radius:16px;font-size:0.88rem;line-height:1.6;background:var(--bg);border:1px solid var(--border); }
+.tutor-msg.tutor-user .tutor-bubble { background:var(--navy);color:white;border-color:transparent; }
+.tutor-bubble.bubble-wrong { background:#fff5f5;border-color:#ef9a9a; }
+.tutor-bubble.bubble-correct { background:#f1f8e9;border-color:#a5d6a7; }
+.tutor-bubble.bubble-explain { background:#e8eaf6;border-color:#9fa8da; }
+.tutor-typing { display:flex;gap:5px;align-items:center;padding:14px 16px; }
+.tutor-typing span { width:8px;height:8px;border-radius:50%;background:var(--sky);animation:typing-dot 1.2s infinite; }
+.tutor-typing span:nth-child(2) { animation-delay:0.2s; }
+.tutor-typing span:nth-child(3) { animation-delay:0.4s; }
+@keyframes typing-dot { 0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)} }
+@keyframes fadeInUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.retry-btn { margin-top:10px;background:var(--navy);color:white;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:0.82rem;font-weight:600; }
+.retry-btn:hover { opacity:0.85; }
 </style>
 </head>
 <body>
@@ -721,10 +749,14 @@ label[for="remember-me"]:hover { color:var(--navy); }
       <div class="error-msg" id="login-error"></div>
       <div class="field"><label>Email Address</label><input type="email" id="login-email" placeholder="Enter your email" onkeydown="if(event.key==='Enter')doFirebaseLogin()"/></div>
       <div class="field"><label>Password</label><div style="position:relative"><input type="password" id="login-pass" placeholder="Enter password" style="width:100%;padding-right:46px" onkeydown="if(event.key==='Enter')doFirebaseLogin()"/><button type="button" onclick="togglePass('login-pass',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.15rem;line-height:1;padding:0;color:var(--subtext)">👁</button></div></div>
-      <button class="btn btn-primary" id="login-btn" onclick="doFirebaseLogin()">Sign In →</button>
-      <div style="text-align:center;margin-top:14px">
-        <button onclick="doForgotPassword()" style="background:none;border:none;color:var(--sky);font-size:0.88rem;cursor:pointer;text-decoration:underline;font-family:inherit">Forgot password?</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <label id="remember-me" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--subtext);user-select:none">
+          <input type="checkbox" id="remember-me-check" style="width:15px;height:15px;accent-color:var(--navy);cursor:pointer" checked/>
+          Remember me
+        </label>
+        <button onclick="doForgotPassword()" style="background:none;border:none;color:var(--sky);font-size:0.85rem;cursor:pointer;text-decoration:underline;font-family:inherit;padding:0">Forgot password?</button>
       </div>
+      <button class="btn btn-primary" id="login-btn" onclick="doFirebaseLogin()">Sign In →</button>
 
     </div>
 
@@ -796,6 +828,10 @@ label[for="remember-me"]:hover { color:var(--navy); }
     <button class="nav-item" onclick="showPage('schedule')" data-page="schedule">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
       Schedule
+    </button>
+    <button class="nav-item" onclick="showPage('aitutor')" data-page="aitutor">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 9h-2V5h2v6zm0 4h-2v-2h2v2z"/></svg>
+      AI Tutor
     </button>
   </nav>
 
@@ -984,6 +1020,34 @@ label[for="remember-me"]:hover { color:var(--navy); }
         <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="doImport(event)"/>
       </div>
 
+      <!-- AI TUTOR API KEY SETTINGS -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🤖 AI Tutor Settings</div>
+            <div class="card-subtitle">Set the Anthropic API key — all students will use it automatically</div>
+          </div>
+          <span id="ai-key-status" style="font-size:0.82rem;padding:4px 12px;border-radius:20px;font-weight:600;background:#fff5f5;color:#c62828">❌ Not set</span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
+          <div style="position:relative;flex:1;min-width:260px">
+            <input type="password" id="ai-key-input" placeholder="sk-ant-api03-..."
+              style="width:100%;padding:11px 46px 11px 14px;border:2px solid var(--border);border-radius:10px;font-family:monospace;font-size:0.88rem;outline:none;transition:border .2s;box-sizing:border-box"
+              onfocus="this.style.borderColor='var(--blue)'" onblur="this.style.borderColor='var(--border)'"
+              onkeydown="if(event.key==='Enter')saveAiApiKey()"/>
+            <button type="button" onclick="togglePass('ai-key-input',this)"
+              style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--subtext)">👁</button>
+          </div>
+          <button id="ai-key-save-btn" onclick="saveAiApiKey()" class="btn btn-primary" style="white-space:nowrap">Save Key →</button>
+          <button onclick="removeAiApiKey()" class="btn btn-danger" style="white-space:nowrap">🗑 Remove</button>
+        </div>
+        <div style="margin-top:12px;padding:10px 14px;background:var(--bg);border-radius:8px;font-size:0.82rem;color:var(--subtext);line-height:1.7">
+          🔑 Get a free API key at <strong>console.anthropic.com</strong> → API Keys → Create Key<br>
+          🔒 The key is stored securely in your database — students never see it<br>
+          👥 All students and admins automatically use this key when it's set
+        </div>
+      </div>
+
     </div>
     <div class="page" id="page-classrooms" style="display:none!important"></div>
 
@@ -1063,6 +1127,106 @@ label[for="remember-me"]:hover { color:var(--navy); }
         <div id="schedule-grid"></div>
       </div>
     </div>
+
+    <!-- ══ AI TUTOR PAGE ══ -->
+    <div class="page" id="page-aitutor">
+      <div style="display:grid;grid-template-columns:1fr 340px;gap:18px;height:calc(100vh - 160px);min-height:500px">
+
+        <!-- Chat Panel -->
+        <div class="card" style="display:flex;flex-direction:column;padding:0;overflow:hidden">
+          <div class="card-header" style="padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+            <div>
+              <div class="card-title">🤖 AI Math Tutor</div>
+              <div class="card-subtitle" id="tutor-mode-label">Ask any math question or submit your homework for instant checking</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="clearTutorChat()">🗑 Clear</button>
+          </div>
+
+          <!-- Messages -->
+          <div id="tutor-messages" style="flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px">
+            <div class="tutor-msg tutor-ai">
+              <div class="tutor-avatar">🤖</div>
+              <div class="tutor-bubble">
+                <strong>Ahlan! I'm your MOHRA Math Tutor.</strong><br><br>
+                I can help you with:<br>
+                • <strong>Ask a question</strong> — type any math problem<br>
+                • <strong>Check homework</strong> — paste your answers and I'll grade them instantly<br><br>
+                Wrong answers? I won't just tell you — I'll <em>teach</em> you until you get it right! 💪
+              </div>
+            </div>
+          </div>
+
+          <!-- Homework pending notice -->
+          <div id="tutor-hw-notice" style="display:none;background:#fff8e1;border-top:2px solid #ffa726;padding:10px 18px;font-size:0.82rem;color:#e65100;flex-shrink:0">
+            ⚠️ <strong>Homework Check Mode:</strong> You must fix your wrong answers before continuing. <span id="tutor-hw-remaining"></span>
+          </div>
+
+          <!-- Input -->
+          <div style="padding:14px 18px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:10px;align-items:flex-end">
+            <textarea id="tutor-input" placeholder="Type your question or paste homework answers here..." rows="2"
+              style="flex:1;resize:none;padding:10px 14px;border:2px solid var(--border);border-radius:10px;font-family:inherit;font-size:0.92rem;outline:none;transition:border .2s"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTutorMessage()}"
+              onfocus="this.style.borderColor='var(--blue)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+            <button onclick="sendTutorMessage()" id="tutor-send-btn"
+              style="background:var(--navy);color:white;border:none;border-radius:10px;padding:10px 18px;cursor:pointer;font-family:inherit;font-weight:700;font-size:0.92rem;white-space:nowrap;transition:opacity .2s">
+              Send ✈
+            </button>
+          </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div style="display:flex;flex-direction:column;gap:14px">
+
+          <!-- Quick Homework Submit -->
+          <div class="card" style="flex-shrink:0">
+            <div class="card-title" style="margin-bottom:10px">📋 Submit Homework</div>
+            <div class="card-subtitle" style="margin-bottom:12px">Paste your homework questions & answers to get instant feedback</div>
+            <textarea id="tutor-hw-input" rows="6" placeholder="Example:&#10;Q1: 2x + 5 = 13 → x = 3&#10;Q2: 3² + 4² = 25&#10;Q3: Area of circle r=5 → 78.5" 
+              style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:0.82rem;resize:vertical;outline:none"
+              onfocus="this.style.borderColor='var(--blue)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+            <button onclick="submitHomeworkForCheck()" class="btn btn-primary" style="width:100%;margin-top:10px">
+              ✅ Check My Homework
+            </button>
+          </div>
+
+          <!-- Stats -->
+          <div class="card" style="flex-shrink:0">
+            <div class="card-title" style="margin-bottom:12px">📊 Session Stats</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center">
+                <div style="font-size:1.4rem;font-weight:800;color:var(--navy)" id="stat-correct">0</div>
+                <div style="font-size:0.72rem;color:var(--subtext)">Correct ✅</div>
+              </div>
+              <div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center">
+                <div style="font-size:1.4rem;font-weight:800;color:#ef5350" id="stat-wrong">0</div>
+                <div style="font-size:0.72rem;color:var(--subtext)">Corrected ❌</div>
+              </div>
+              <div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center">
+                <div style="font-size:1.4rem;font-weight:800;color:var(--sky)" id="stat-questions">0</div>
+                <div style="font-size:0.72rem;color:var(--subtext)">Questions</div>
+              </div>
+              <div style="background:var(--bg);border-radius:10px;padding:10px;text-align:center">
+                <div style="font-size:1.4rem;font-weight:800;color:#66bb6a" id="stat-score">—</div>
+                <div style="font-size:0.72rem;color:var(--subtext)">Score</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tips -->
+          <div class="card" style="background:linear-gradient(135deg,#1a237e,#283593);color:white;flex-shrink:0">
+            <div style="font-weight:700;margin-bottom:8px;font-size:0.92rem">💡 How to submit homework</div>
+            <div style="font-size:0.78rem;opacity:0.9;line-height:1.6">
+              Write each answer on a new line:<br>
+              <code style="background:rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px;font-size:0.75rem">Q1: [question] → [your answer]</code><br><br>
+              The AI will check each one, explain mistakes, and ask you to retry until correct!
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /main-app -->
 
@@ -2334,6 +2498,321 @@ function fileColor(type) {
   if (type.includes('sheet') || type.includes('excel')) return '#e8fde8';
   if (type.includes('presentation')) return '#fef3e2';
   return '#e8eaf6';
+}
+
+// ═══════════════════════════════════════════════
+//  AI TUTOR
+// ═══════════════════════════════════════════════
+
+const TUTOR_SYSTEM_PROMPT = `You are MOHRA, an expert AI Math Tutor for MOHRA Math Academy — a professional Egyptian math tutoring center run by Mr. Hazem Mohra.
+
+## YOUR IDENTITY
+- Name: MOHRA Tutor
+- Personality: Strict but warm, encouraging, like a brilliant Egyptian math teacher who genuinely cares about every student succeeding
+- Language: Respond in the same language the student uses (Arabic or English). If mixed, mirror their mix.
+- Tone: Direct, clear, never condescending. Celebrate correct answers genuinely. Be firm but kind on wrong ones.
+
+## YOUR CORE MISSION
+You have TWO modes:
+
+### MODE 1 — FREE TUTORING (student asks a math question)
+When a student asks a math question:
+1. NEVER just give the answer directly for non-trivial problems
+2. Use the Socratic method: guide them step-by-step with hints
+3. Ask "What do you think the first step is?" to engage them
+4. If they're stuck after 2 attempts, show a worked example of a SIMILAR (not identical) problem, then ask them to solve theirs
+5. When they get it right, explain WHY it works, not just THAT it works
+6. Connect concepts: "This is the same idea as..." to build deeper understanding
+
+### MODE 2 — HOMEWORK CHECKING (student submits answers)
+When you receive homework answers to check (format: "Q1: [question] → [answer]" or similar):
+
+STRICT GRADING RULES:
+1. Check EVERY answer mathematically — do not accept approximate answers unless the problem asks for estimation
+2. For each answer, respond with one of:
+   - ✅ CORRECT: "[brief praise]"
+   - ❌ WRONG: Do NOT give the correct answer. Instead:
+     a) Explain exactly what mistake was made (conceptual error? calculation slip? wrong formula?)
+     b) Give a clear step-by-step explanation of HOW to approach this type of problem
+     c) End with: "🔄 Now try again — send me your new answer for this question."
+3. After checking all answers, show a summary:
+   - Score: X/Y correct
+   - List which questions need retry
+   - Motivational message based on score
+
+HOMEWORK RETRY RULES:
+- When a student sends a retry answer, check it immediately
+- If still wrong: explain differently, use a different approach or analogy
+- If correct on retry: celebrate and note "Much better! You got there 💪"
+- NEVER move on or ignore a wrong answer — keep pushing until they solve it correctly
+- Track which questions are still pending in each message
+
+## MATH TOPICS YOU COVER
+Algebra, Geometry, Trigonometry, Calculus, Statistics, Number Theory, Egyptian curriculum (Thanaweya Amma, Preparatory), and competition math.
+
+## FORMATTING RULES
+- Use clear mathematical notation: write fractions as a/b, powers as x², use → for steps
+- Number your steps: Step 1, Step 2...
+- Put final answers in a box: 【Answer: X】
+- Use emojis sparingly but effectively (✅ ❌ 💡 🔄 💪 📐)
+- Keep responses focused — no unnecessary padding
+
+## WHAT YOU NEVER DO
+- Never give away homework answers directly when checking (students must earn the correct answer)
+- Never be sarcastic or make a student feel stupid
+- Never skip explaining WHY, only HOW
+- Never accept "close enough" on homework checks
+- Never discuss topics unrelated to mathematics or this academy
+
+## RESPONSE LANGUAGE
+- If the student writes in Arabic → respond fully in Arabic
+- If the student writes in English → respond fully in English
+- Mathematical notation stays the same in both languages`;
+
+// Tutor state
+var tutorMessages = []; // {role, content}
+var tutorStats = { correct: 0, wrong: 0, questions: 0 };
+var tutorHwPending = []; // questions still needing retry
+var tutorIsTyping = false;
+window._tutorApiKey = ''; // loaded from Firestore on login
+
+async function loadTutorApiKey() {
+  try {
+    const doc = await fsGet('meta', 'settings');
+    if (doc && doc.anthropicKey) {
+      window._tutorApiKey = doc.anthropicKey;
+      updateTutorKeyStatus(true);
+    } else {
+      updateTutorKeyStatus(false);
+    }
+  } catch(e) { updateTutorKeyStatus(false); }
+}
+
+function updateTutorKeyStatus(hasKey) {
+  const el = document.getElementById('ai-key-status');
+  if (!el) return;
+  if (hasKey) {
+    el.textContent = '✅ Active';
+    el.style.cssText = 'font-size:0.82rem;padding:4px 12px;border-radius:20px;font-weight:600;background:#e8f5e9;color:#2e7d32';
+  } else {
+    el.textContent = '❌ Not set';
+    el.style.cssText = 'font-size:0.82rem;padding:4px 12px;border-radius:20px;font-weight:600;background:#fff5f5;color:#c62828';
+  }
+}
+
+async function saveAiApiKey() {
+  const input = document.getElementById('ai-key-input');
+  const key = input.value.trim();
+  if (!key || !key.startsWith('sk-ant-')) {
+    toast('Invalid key — must start with sk-ant-', 'error'); return;
+  }
+  const btn = document.getElementById('ai-key-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  try {
+    await window._fbSaveDoc('meta', 'settings', { anthropicKey: key });
+    window._tutorApiKey = key;
+    updateTutorKeyStatus(true);
+    input.value = '';
+    toast('✅ API key saved! All students can now use the AI Tutor.', 'success');
+  } catch(e) {
+    toast('Failed to save key. Check your connection.', 'error');
+  }
+  btn.disabled = false; btn.textContent = 'Save Key →';
+}
+
+async function removeAiApiKey() {
+  if (!confirm('Remove the AI Tutor API key? Students will lose access.')) return;
+  try {
+    await window._fbSaveDoc('meta', 'settings', { anthropicKey: '' });
+    window._tutorApiKey = '';
+    updateTutorKeyStatus(false);
+    toast('API key removed.', 'warn');
+  } catch(e) { toast('Failed. Check your connection.', 'error'); }
+}
+
+function clearTutorChat() {
+  tutorMessages = [];
+  tutorStats = { correct: 0, wrong: 0, questions: 0 };
+  tutorHwPending = [];
+  updateTutorStats();
+  updateHwNotice();
+  const box = document.getElementById('tutor-messages');
+  box.innerHTML = `<div class="tutor-msg tutor-ai">
+    <div class="tutor-avatar">🤖</div>
+    <div class="tutor-bubble">
+      <strong>Chat cleared!</strong> Ready for a fresh start. Ask me anything or submit your homework. 📚
+    </div>
+  </div>`;
+}
+
+function updateTutorStats() {
+  const total = tutorStats.correct + tutorStats.wrong;
+  document.getElementById('stat-correct').textContent  = tutorStats.correct;
+  document.getElementById('stat-wrong').textContent    = tutorStats.wrong;
+  document.getElementById('stat-questions').textContent = tutorStats.questions;
+  document.getElementById('stat-score').textContent    = total > 0 ? Math.round((tutorStats.correct/total)*100) + '%' : '—';
+}
+
+function updateHwNotice() {
+  const notice = document.getElementById('tutor-hw-notice');
+  if (tutorHwPending.length > 0) {
+    notice.style.display = 'block';
+    document.getElementById('tutor-hw-remaining').textContent =
+      tutorHwPending.length + ' question(s) still need your answer: ' + tutorHwPending.join(', ');
+  } else {
+    notice.style.display = 'none';
+  }
+}
+
+function appendTutorMsg(role, html, bubbleClass) {
+  const box = document.getElementById('tutor-messages');
+  const isUser = role === 'user';
+  const name = isUser ? (state.currentUser?.name?.split(' ')[0] || 'You') : 'MOHRA';
+  const avatar = isUser ? name.charAt(0).toUpperCase() : '🤖';
+  const div = document.createElement('div');
+  div.className = 'tutor-msg ' + (isUser ? 'tutor-user' : 'tutor-ai');
+  div.innerHTML = `
+    <div class="tutor-avatar">${avatar}</div>
+    <div class="tutor-bubble ${bubbleClass||''}">${html}</div>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function showTypingIndicator() {
+  const box = document.getElementById('tutor-messages');
+  const div = document.createElement('div');
+  div.className = 'tutor-msg tutor-ai';
+  div.id = 'tutor-typing-indicator';
+  div.innerHTML = `<div class="tutor-avatar">🤖</div>
+    <div class="tutor-bubble" style="padding:0">
+      <div class="tutor-typing"><span></span><span></span><span></span></div>
+    </div>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function removeTypingIndicator() {
+  const el = document.getElementById('tutor-typing-indicator');
+  if (el) el.remove();
+}
+
+function submitHomeworkForCheck() {
+  const hw = document.getElementById('tutor-hw-input').value.trim();
+  if (!hw) { toast('Paste your homework answers first!', 'warn'); return; }
+  document.getElementById('tutor-hw-input').value = '';
+  document.getElementById('tutor-input').value =
+    'Please check my homework answers:\n\n' + hw;
+  sendTutorMessage();
+}
+
+async function sendTutorMessage() {
+  const input = document.getElementById('tutor-input');
+  const text = input.value.trim();
+  if (!text || tutorIsTyping) return;
+
+  input.value = '';
+  tutorIsTyping = true;
+  document.getElementById('tutor-send-btn').disabled = true;
+
+  // Show user message
+  appendTutorMsg('user', text.replace(/\n/g, '<br>'));
+  tutorMessages.push({ role: 'user', content: text });
+  tutorStats.questions++;
+  updateTutorStats();
+
+  showTypingIndicator();
+
+  // Get API key from Firestore (set by founder in Admin panel)
+  const anthropicKey = window._tutorApiKey || '';
+  if (!anthropicKey) {
+    appendTutorMsg('ai', '🔑 The AI Tutor is not configured yet. Please ask <strong>Mr. Hazem Mohra</strong> to set the API key in the Admin Panel → AI Tutor Settings.', 'bubble-explain');
+    tutorIsTyping = false;
+    document.getElementById('tutor-send-btn').disabled = false;
+    return;
+  }
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey.trim(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-allow-browser': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: TUTOR_SYSTEM_PROMPT,
+        messages: tutorMessages
+      })
+    });
+
+    const data = await resp.json();
+    removeTypingIndicator();
+
+    if (data.error) {
+      const errMsg = data.error.message || 'Something went wrong.';
+      if (data.error.type === 'authentication_error' || errMsg.includes('API key') || errMsg.includes('auth')) {
+        window._tutorApiKey = '';
+        appendTutorMsg('ai', '🔑 Invalid API key. Please ask Mr. Hazem Mohra to update it in Admin Panel → AI Tutor Settings.', 'bubble-wrong');
+      } else {
+        appendTutorMsg('ai', '⚠️ Error: ' + errMsg, 'bubble-wrong');
+      }
+      tutorIsTyping = false;
+      document.getElementById('tutor-send-btn').disabled = false;
+      return;
+    }
+
+    const reply = data.content.map(b => b.text || '').join('');
+    tutorMessages.push({ role: 'assistant', content: reply });
+
+    // Detect correct/wrong/explain for styling
+    const hasCorrect = /✅/.test(reply);
+    const hasWrong   = /❌/.test(reply);
+    const hasRetry   = /🔄/.test(reply);
+
+    // Update stats based on response
+    const correctCount = (reply.match(/✅/g) || []).length;
+    const wrongCount   = (reply.match(/❌/g) || []).length;
+    if (correctCount) tutorStats.correct += correctCount;
+    if (wrongCount)   tutorStats.wrong   += wrongCount;
+
+    // Parse pending questions from reply
+    if (hasRetry) {
+      const matches = reply.match(/Q\d+/gi) || [];
+      matches.forEach(q => { if (!tutorHwPending.includes(q.toUpperCase())) tutorHwPending.push(q.toUpperCase()); });
+    }
+    // Remove resolved questions if answer accepted
+    if (hasCorrect && !hasWrong) tutorHwPending = [];
+
+    updateTutorStats();
+    updateHwNotice();
+
+    // Format reply nicely
+    let formatted = reply
+      .replace(/\n/g, '<br>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/【(.*?)】/g, '<span style="background:var(--navy);color:white;padding:2px 10px;border-radius:6px;font-weight:700;">$1</span>')
+      .replace(/✅/g, '<span style="color:#2e7d32;font-weight:700;">✅</span>')
+      .replace(/❌/g, '<span style="color:#c62828;font-weight:700;">❌</span>')
+      .replace(/🔄/g, '<span style="color:#e65100;font-weight:700;">🔄</span>');
+
+    const bubbleClass = hasWrong ? 'bubble-wrong' : hasCorrect && !hasWrong ? 'bubble-correct' : hasRetry ? 'bubble-explain' : '';
+    appendTutorMsg('ai', formatted, bubbleClass);
+
+  } catch(e) {
+    removeTypingIndicator();
+    const isLocalFile = window.location.protocol === 'file:';
+    const msg = isLocalFile
+      ? '⚠️ The AI Tutor only works on the live website — not from a local file. Please open the site at <strong>shaheenmahmoud268-lgtm.github.io</strong> to use it.'
+      : '⚠️ Connection error. Please check your internet and try again.';
+    appendTutorMsg('ai', msg, 'bubble-wrong');
+  }
+
+  tutorIsTyping = false;
+  document.getElementById('tutor-send-btn').disabled = false;
+  document.getElementById('tutor-input').focus();
 }
 </script>
 <div class="modal-overlay" id="modal-classroom">
