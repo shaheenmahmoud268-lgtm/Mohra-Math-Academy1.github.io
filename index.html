@@ -3026,8 +3026,8 @@ async function sendTutorMessage() {
 
   showTypingIndicator();
 
-  // Get API key from Firestore (set by founder in Admin panel)
-  const geminiKey = window._tutorApiKey || '';
+  // Get API key from Firestore (set by founder in Admin panel) or use local testing key
+  const geminiKey = window._tutorApiKey || 'AIzaSyB1RmWbCyuSA3EY4LVPGlddkLdh84DRVxc';
   if (!geminiKey) {
     appendTutorMsg('ai', '🔑 The AI Tutor is not configured yet. Please ask <strong>Mr. Hazem Mohra</strong> to set the API key in the Admin Panel → AI Tutor Settings.', 'bubble-explain');
     tutorIsTyping = false;
@@ -3043,7 +3043,7 @@ async function sendTutorMessage() {
     }));
 
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiKey.trim()}`,
+      `https://cors-anywhere.herokuapp.com/https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${geminiKey.trim()}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3172,7 +3172,7 @@ async function sendFloatMessage() {
   box.appendChild(typingDiv);
   box.scrollTop = box.scrollHeight;
 
-  const key = window._tutorApiKey || '';
+  const key = window._tutorApiKey || 'AIzaSyB1RmWbCyuSA3EY4LVPGlddkLdh84DRVxc';
   if (!key) {
     typingDiv.remove();
     appendFloatMsg('ai', '🔑 Please ask <strong>Mr. Hazem</strong> to configure the AI key in the Admin Panel.', true);
@@ -3188,7 +3188,7 @@ async function sendFloatMessage() {
     }));
 
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${key.trim()}`,
+      `https://cors-anywhere.herokuapp.com/https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${key.trim()}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3697,5 +3697,3 @@ function renderParentPortal() {
 
 </body>
 </html>
-
-
