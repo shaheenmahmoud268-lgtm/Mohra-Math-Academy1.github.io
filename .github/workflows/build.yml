@@ -1,5 +1,10 @@
 name: Build My App
-on: [push]
+on: [push, workflow_dispatch]
+
+# This tells the robot to use the newest Node version
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CI: false # This prevents small warnings from stopping the build
 
 jobs:
   build:
@@ -14,14 +19,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24 # We are moving to the latest version here
           
       - name: Install Capacitor
         run: npm install
           
       - name: Turn Website into App
         run: |
-          # We tell Capacitor that your website files are in the main folder (./)
           npx cap init "Mohra Academy" "com.mohra.academy" --web-dir ./
           npx cap add android
           npx cap add ios
