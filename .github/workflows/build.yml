@@ -6,19 +6,23 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      
+      - name: Create Package File
+        run: |
+          echo '{ "name": "mohra-academy", "version": "1.0.0", "dependencies": { "@capacitor/core": "latest", "@capacitor/cli": "latest", "@capacitor/android": "latest", "@capacitor/ios": "latest" } }' > package.json
+          
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-      
-      - name: Install & Build
-        run: |
-          npm install
-          npm run build --if-present
           
-      - name: Add Mobile Folders
+      - name: Install Capacitor
+        run: npm install
+          
+      - name: Turn Website into App
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/ios
-          npx cap init "My App" "com.sample.app" --web-dir dist
+          # We tell Capacitor that your website files are in the main folder (./)
+          npx cap init "Mohra Academy" "com.mohra.academy" --web-dir ./
           npx cap add android
           npx cap add ios
           npx cap sync
@@ -35,10 +39,10 @@ jobs:
           cp -r build/Build/Products/Debug-iphoneos/App.app Payload/
           zip -r App.ipa Payload
 
-      - name: Upload Files
+      - name: Upload My Files
         uses: actions/upload-artifact@v4
         with:
-          name: my-app-files
+          name: mohra-app-files
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             App.ipa
