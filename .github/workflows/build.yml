@@ -9,9 +9,11 @@ jobs:
 
       - name: Create Package & Website Folder
         run: |
+          # 1. Setup dummy package.json
           echo '{ "name": "mohra-academy", "version": "1.0.0", "dependencies": { "@capacitor/core": "latest", "@capacitor/cli": "latest", "@capacitor/android": "latest", "@capacitor/ios": "latest" } }' > package.json
+          
+          # 2. Setup the website folder Capacitor expects
           mkdir www
-          cp -r index.html www/ 2>/dev/null || true
           cp -r * www/ 2>/dev/null || true
 
       - name: Setup Node
@@ -26,8 +28,7 @@ jobs:
         run: |
           npx cap init "Mohra Academy" "com.mohra.academy" --web-dir www
           npx cap add android
-          # This forces the creation of the iOS folder properly
-          npx cap add ios 
+          npx cap add ios
           npx cap sync
 
       - name: Build Android
@@ -38,17 +39,17 @@ jobs:
 
       - name: Build iOS (iPad Air 2 Support)
         run: |
-          # We check if the folder exists first to avoid Error 66
-          ls -R ios/App/
-          
-          # We build specifically for older devices
-          xcodebuild -workspace ios/App/App.xcworkspace \
+          # Building using the Project file (.xcodeproj) since Workspace doesn't exist
+          xcodebuild -project ios/App/App.xcodeproj \
                      -scheme App \
                      -configuration Debug \
                      -sdk iphoneos \
                      -derivedDataPath build \
-                     IPHONEOS_DEPLOYMENT_TARGET=15.0 
+                     IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO
 
+          # Package the built .app into a .ipa zip
           mkdir -p Payload
           cp -r build/Build/Products/Debug-iphoneos/App.app Payload/
           zip -r App.ipa Payload
