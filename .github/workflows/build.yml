@@ -7,9 +7,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create Package File
+      - name: Create Package & Website Folder
         run: |
+          # 1. Create a dummy package.json
           echo '{ "name": "mohra-academy", "version": "1.0.0", "dependencies": { "@capacitor/core": "latest", "@capacitor/cli": "latest", "@capacitor/android": "latest", "@capacitor/ios": "latest" } }' > package.json
+          
+          # 2. Create a folder named 'www' and move your files into it
+          mkdir www
+          cp -r * www/ 2>/dev/null || true 
+          # (The line above copies your HTML/CSS into 'www')
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -21,8 +27,8 @@ jobs:
 
       - name: Initialize App
         run: |
-          # This forces Capacitor to treat the main folder as the website
-          npx cap init "Mohra Academy" "com.mohra.academy" --web-dir ./
+          # We now point to 'www' instead of './'
+          npx cap init "Mohra Academy" "com.mohra.academy" --web-dir www
           npx cap add android || true
           npx cap add ios || true
           npx cap sync
