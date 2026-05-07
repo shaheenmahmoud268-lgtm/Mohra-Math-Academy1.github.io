@@ -1,53 +1,49 @@
 name: Build My App
 on: [push, workflow_dispatch]
 
-# This tells the robot to use the newest Node version
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  CI: false # This prevents small warnings from stopping the build
-
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Create Package File
         run: |
           echo '{ "name": "mohra-academy", "version": "1.0.0", "dependencies": { "@capacitor/core": "latest", "@capacitor/cli": "latest", "@capacitor/android": "latest", "@capacitor/ios": "latest" } }' > package.json
-          
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24 # We are moving to the latest version here
-          
+          node-version: 24
+
       - name: Install Capacitor
         run: npm install
-          
-      - name: Turn Website into App
+
+      - name: Initialize App
         run: |
+          # This forces Capacitor to treat the main folder as the website
           npx cap init "Mohra Academy" "com.mohra.academy" --web-dir ./
-          npx cap add android
-          npx cap add ios
+          npx cap add android || true
+          npx cap add ios || true
           npx cap sync
-          
-      - name: Build Android APK
+
+      - name: Build Android
         run: |
           cd android
+          chmod +x gradlew
           ./gradlew assembleDebug
-          
-      - name: Build iOS IPA
+
+      - name: Build iOS
         run: |
           xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -sdk iphoneos -derivedDataPath build
           mkdir -p Payload
           cp -r build/Build/Products/Debug-iphoneos/App.app Payload/
           zip -r App.ipa Payload
 
-      - name: Upload My Files
+      - name: Upload Files
         uses: actions/upload-artifact@v4
         with:
           name: mohra-app-files
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             App.ipa
-            
