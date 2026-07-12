@@ -2,7 +2,7 @@
 <html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>MOHRA – Math Academy</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet"/>
 <script>
@@ -184,8 +184,8 @@ function setAuthLoading(on) {
 
 function saveSession(uid, idToken, refreshTok) {
   try {
+    // Always persist across browser restarts/reloads until explicit logout.
     const payload = JSON.stringify({ uid, idToken, refreshTok });
-    // Always persist — remember me is permanently enabled
     localStorage.setItem('mohra_session', payload);
     sessionStorage.removeItem('mohra_session');
   } catch(e) {}
@@ -372,7 +372,8 @@ window.addEventListener('load', async function() {
     if (cb && pref !== null) cb.checked = pref === '1';
     if (cb) cb.addEventListener('change', () => {
       try { localStorage.setItem('mohra_remember', cb.checked ? '1' : '0'); } catch(e) {}
-      if (!cb.checked) { try { localStorage.removeItem('mohra_session'); } catch(e) {} }
+      // Note: session now always persists in localStorage until explicit logout,
+      // regardless of this checkbox's state.
     });
   } catch(e) {}
   setAuthLoading(true);
@@ -701,226 +702,16 @@ tr:hover td { background:var(--bg); }
 .progress-bar-wrap { background:var(--bg); border-radius:100px; height:6px; overflow:hidden; margin-top:6px; }
 .progress-bar { height:100%; background: linear-gradient(90deg, var(--navy), var(--cyan)); border-radius:100px; transition:width 0.3s; }
 
-/* ══════════════════════════════════════════════
-   RESPONSIVE — Mobile-first overhaul
-   ══════════════════════════════════════════════ */
-
-/* ── Hamburger / mobile-nav toggle ── */
-#nav-hamburger {
-  display: none;
-  background: rgba(255,255,255,0.12);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 1.3rem;
-  cursor: pointer;
-  line-height: 1;
-  transition: background 0.2s;
-}
-#nav-hamburger:hover { background: rgba(255,255,255,0.22); }
-
-/* ── Tablet (≤ 900px) ── */
-@media (max-width: 900px) {
-  .content { padding: 20px 16px; }
-  .stats-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
-  .analytics-grid { grid-template-columns: 1fr; }
-  .profile-grid { grid-template-columns: 1fr; }
-  .file-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-  .video-list { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-}
-
-/* ── Mobile (≤ 640px) ── */
-@media (max-width: 640px) {
-
-  /* AUTH */
-  #auth-screen { padding: 16px; }
-  .auth-card {
-    padding: 28px 20px 24px;
-    width: 100%;
-    border-radius: 18px;
-  }
-  .auth-logo h1 { font-size: 1.6rem; }
-  .auth-logo img { width: 80px; height: 80px; }
-
-  /* HEADER */
-  header {
-    padding: 0 12px;
-    height: auto;
-    min-height: 60px;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding-top: 10px;
-    padding-bottom: 10px;
-  }
-  .header-brand h2 { font-size: 1.1rem; }
-  .header-brand span { display: none; }
-  .header-logo { width: 38px; height: 38px; }
-
-  /* Hide verbose header-right items; show hamburger */
-  #nav-hamburger { display: inline-flex; align-items: center; justify-content: center; }
-  .user-pill { display: none; }
-  .btn-logout {
-    font-size: 0.78rem;
-    padding: 6px 10px;
-  }
-  #dark-mode-btn, #notif-btn { padding: 7px 10px; font-size: 1rem; }
-
-  /* Notification panel — full-width on mobile */
-  #notif-panel {
-    width: calc(100vw - 24px) !important;
-    right: -8px !important;
-    left: auto;
-  }
-
-  /* NAV — collapsible drawer */
-  nav {
-    padding: 0;
-    flex-direction: column;
-    position: fixed;
-    top: 0;
-    left: -100%;
-    width: 260px;
-    height: 100%;
-    background: var(--white, white);
-    z-index: 200;
-    box-shadow: 4px 0 24px rgba(0,0,0,0.18);
-    overflow-y: auto;
-    transition: left 0.28s cubic-bezier(0.4,0,0.2,1);
-    border-bottom: none;
-    padding-top: 60px;
-  }
-  nav.mobile-open {
-    left: 0;
-  }
-  #nav-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.38);
-    z-index: 199;
-  }
-  #nav-overlay.visible { display: block; }
-
-  .nav-item {
-    width: 100%;
-    height: 50px;
-    padding: 0 20px;
-    border-bottom: 1px solid var(--border);
-    justify-content: flex-start;
-    border-bottom-width: 1px !important;
-    font-size: 0.9rem;
-  }
-  .nav-item.active {
-    border-bottom-color: var(--border) !important;
-    background: var(--light);
-    border-left: 4px solid var(--blue);
-  }
-  .nav-item svg { width: 20px; height: 20px; flex-shrink: 0; }
-
-  /* CONTENT */
-  .content { padding: 14px 12px; max-width: 100%; }
-
-  /* HERO */
-  .hero {
-    padding: 20px 16px;
-    flex-direction: column;
-    gap: 16px;
-    border-radius: 14px;
-  }
-  .hero-text h2 { font-size: 1.3rem; }
-  .hero-text p { font-size: 0.85rem; }
-  .hero-logo { width: 64px; height: 64px; }
-
-  /* CARDS */
-  .card { padding: 16px 14px; border-radius: 12px; }
-  .card-header { flex-direction: column; align-items: flex-start; }
-  .card-header .btn { width: 100%; justify-content: center; }
-  .card-title { font-size: 1.1rem; }
-
-  /* STATS */
-  .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    margin-bottom: 16px;
-  }
-  .stat-card { padding: 16px; }
-  .stat-value { font-size: 1.7rem; }
-
-  /* TABLE — horizontal scroll with min-width preserved */
-  .table-wrap { border-radius: 8px; -webkit-overflow-scrolling: touch; }
-  table { min-width: 520px; font-size: 0.82rem; }
-  th, td { padding: 10px 12px; }
-
-  /* MODALS */
-  .modal {
-    padding: 22px 16px 20px;
-    border-radius: 16px;
-    width: calc(100vw - 24px);
-    max-width: 100%;
-    margin: 0 auto;
-  }
-  .modal-overlay { padding: 12px; align-items: flex-end; }
-  .modal-overlay.open .modal { transform: scale(1) translateY(0); }
-  .modal-title { font-size: 1.15rem; }
-  .modal-actions { flex-direction: column-reverse; gap: 8px; }
-  .modal-actions .btn { width: 100%; justify-content: center; }
-
-  /* flex-row inputs — stack on mobile */
-  .flex-row { flex-direction: column; gap: 0; }
-  .flex-row .field { width: 100% !important; }
-
-  /* GRIDS */
-  .file-grid { grid-template-columns: 1fr; }
-  .video-list { grid-template-columns: 1fr; }
-  .analytics-grid { grid-template-columns: 1fr; }
-  .profile-grid { grid-template-columns: 1fr; }
-
-  /* CALENDAR */
-  .cal-grid { gap: 2px; }
-  .cal-day { min-height: 46px; font-size: 0.65rem; padding: 2px; }
-  .cal-day-num { font-size: 0.68rem; }
-  .cal-event { display: none; } /* hide events on tiny calendar; still visible on scroll */
-
-  /* SEARCH BAR */
-  .search-bar { gap: 8px; }
-  .search-input { min-width: 0; }
-
-  /* ANALYTICS / progress bars */
-  .analytics-card { padding: 16px; }
-
-  /* CHAT */
-  .chat-bubble { max-width: 88%; font-size: 0.85rem; }
-
-  /* UPLOAD ZONE */
-  .upload-zone { padding: 24px 16px; }
-
-  /* BUTTONS */
-  .btn { font-size: 0.88rem; padding: 11px 18px; }
-  .btn-sm { font-size: 0.78rem; padding: 6px 11px; }
-
-  /* actions in table rows — wrap nicely */
-  .actions-cell { flex-wrap: wrap; gap: 4px; }
-
-  /* oversight cards */
-  .oversight-student-card { flex-wrap: wrap; }
-
-  /* Heatmap — scrollable */
-  #heatmap-grid-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
-  /* Toast — full width on mobile */
-  #toast-container { left: 12px; right: 12px; top: 70px; }
-  .toast { min-width: 0; width: 100%; }
-
-  /* Progress page */
-  .progress-bar-wrap { margin-top: 4px; }
-}
-
-/* ── Small phones (≤ 380px) ── */
-@media (max-width: 380px) {
-  .stats-grid { grid-template-columns: 1fr; }
-  .stat-value { font-size: 1.5rem; }
-  .auth-logo h1 { font-size: 1.4rem; }
+/* RESPONSIVE */
+@media(max-width:640px){
+  header { padding:0 16px; }
+  .content { padding:16px; }
+  .hero { padding:24px; }
+  .hero h2 { font-size:1.4rem; }
+  nav { padding:0 8px; }
+  .nav-item { padding:0 12px; font-size:0.82rem; }
+  .auth-card { padding:32px 24px; }
+  .card { padding:20px; }
 }
 
 /* SECTION TAGS */
@@ -1206,8 +997,8 @@ body.dark-mode .at-risk-card { background:#2a1a1a; }
       <div class="field"><label>Email Address</label><input type="email" id="login-email" placeholder="Enter your email" onkeydown="if(event.key==='Enter')doFirebaseLogin()"/></div>
       <div class="field"><label>Password</label><div style="position:relative"><input type="password" id="login-pass" placeholder="Enter password" style="width:100%;padding-right:46px" onkeydown="if(event.key==='Enter')doFirebaseLogin()"/><button type="button" onclick="togglePass('login-pass',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.15rem;line-height:1;padding:0;color:var(--subtext)">👁</button></div></div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <label id="remember-me" style="display:none;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--subtext);user-select:none">
-          <input type="checkbox" id="remember-me-check" style="width:15px;height:15px;accent-color:var(--navy);cursor:pointer" checked disabled/>
+        <label id="remember-me" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--subtext);user-select:none">
+          <input type="checkbox" id="remember-me-check" style="width:15px;height:15px;accent-color:var(--navy);cursor:pointer" checked/>
           Remember me
         </label>
         <button onclick="doForgotPassword()" style="background:none;border:none;color:var(--sky);font-size:0.85rem;cursor:pointer;text-decoration:underline;font-family:inherit;padding:0">Forgot password?</button>
@@ -1231,7 +1022,6 @@ body.dark-mode .at-risk-card { background:#2a1a1a; }
       </div>
     </div>
     <div class="header-right">
-      <button id="nav-hamburger" onclick="toggleMobileNav()" title="Menu" aria-label="Toggle navigation">☰</button>
       <button id="dark-mode-btn" onclick="toggleDarkMode()" title="Toggle dark mode" style="background:rgba(255,255,255,0.12);color:white;border:none;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:1.1rem;transition:all 0.2s" onmouseover="this.style.background='rgba(255,255,255,0.22)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">🌙</button>
       <div style="position:relative">
         <button id="notif-btn" onclick="toggleNotifPanel()" title="Notifications" style="background:rgba(255,255,255,0.12);color:white;border:none;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:1.1rem;transition:all 0.2s" onmouseover="this.style.background='rgba(255,255,255,0.22)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">🔔</button>
@@ -8969,43 +8759,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     </div>
   </div>
 </div>
-
-<!-- Mobile nav overlay -->
-<div id="nav-overlay" onclick="closeMobileNav()"></div>
-
-<script>
-// Mobile nav drawer
-function toggleMobileNav() {
-  var nav = document.getElementById('main-nav');
-  var overlay = document.getElementById('nav-overlay');
-  if (!nav) return;
-  var isOpen = nav.classList.contains('mobile-open');
-  if (isOpen) {
-    nav.classList.remove('mobile-open');
-    overlay.classList.remove('visible');
-  } else {
-    nav.classList.add('mobile-open');
-    overlay.classList.add('visible');
-  }
-}
-function closeMobileNav() {
-  var nav = document.getElementById('main-nav');
-  var overlay = document.getElementById('nav-overlay');
-  if (nav) nav.classList.remove('mobile-open');
-  if (overlay) overlay.classList.remove('visible');
-}
-document.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('.nav-item').forEach(function(item) {
-    item.addEventListener('click', function() {
-      if (window.innerWidth <= 640) closeMobileNav();
-    });
-  });
-  // Dark mode patch for nav drawer
-  var style = document.createElement('style');
-  style.textContent = 'body.dark-mode #main-nav { background: #161b22; border-right: 1px solid #30363d; } body.dark-mode #nav-overlay { background: rgba(0,0,0,0.55); }';
-  document.head.appendChild(style);
-});
-<\/script>
 
 </body>
 </html>
