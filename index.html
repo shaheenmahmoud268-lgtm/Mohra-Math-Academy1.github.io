@@ -149,18 +149,30 @@ async function loadAllData() {
 window._fbLoadAllData = loadAllData;
 
 // ── Token refresh ────────────────────────────────
+// Returns: { ok: true } on success,
+//          { ok: false, reason: 'invalid' } if the refresh token is genuinely bad/expired/revoked,
+//          { ok: false, reason: 'network' } on a transient/network failure (should NOT log the user out).
 async function refreshToken() {
-  if (!fbRefreshToken) return false;
+  if (!fbRefreshToken) return { ok: false, reason: 'invalid' };
   try {
     const res = await fbFetch('https://securetoken.googleapis.com/v1/token?key=' + FB_API_KEY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: fbRefreshToken })
     });
-    const data = await res.json();
-    if (data.id_token) { fbIdToken = data.id_token; fbRefreshToken = data.refresh_token; return true; }
-  } catch(e) {}
-  return false;
+    let data;
+    try { data = await res.json(); } catch(e) { return { ok: false, reason: 'network' }; }
+    if (data.id_token) { fbIdToken = data.id_token; fbRefreshToken = data.refresh_token; return { ok: true }; }
+    const code = (data.error && (data.error.message || '')) || '';
+    // Only these mean the token is genuinely no longer valid.
+    const invalidCodes = ['TOKEN_EXPIRED', 'INVALID_REFRESH_TOKEN', 'USER_DISABLED', 'USER_NOT_FOUND', 'API_KEY_INVALID'];
+    if (invalidCodes.some(c => code.includes(c))) return { ok: false, reason: 'invalid' };
+    // Unrecognized error shape (rate limit, transient API hiccup, etc.) — treat as transient.
+    return { ok: false, reason: 'network' };
+  } catch(e) {
+    // fetch threw (offline, DNS failure, CORS hiccup, etc.) — transient, not an auth failure.
+    return { ok: false, reason: 'network' };
+  }
 }
 
 // ── Auth helpers ─────────────────────────────────
@@ -197,20 +209,51 @@ function clearSession() {
 }
 
 async function restoreSession() {
-  try {
-    const s = localStorage.getItem('mohra_session') || sessionStorage.getItem('mohra_session');
-    if (!s) return false;
-    const { uid, idToken, refreshTok } = JSON.parse(s);
-    fbIdToken = idToken; fbRefreshToken = refreshTok; fbUserId = uid;
-    const ok = await refreshToken();
-    if (!ok) { clearSession(); return false; }
-    const userData = await fsGet('users', uid);
-    if (!userData || userData.status === 'banned') { clearSession(); return false; }
-    await loadAllData();
+  const s = localStorage.getItem('mohra_session') || sessionStorage.getItem('mohra_session');
+  if (!s) return false;
+  let parsed;
+  try { parsed = JSON.parse(s); } catch(e) { clearSession(); return false; }
+  const { uid, idToken, refreshTok } = parsed;
+  if (!uid || !refreshTok) { clearSession(); return false; }
+  fbIdToken = idToken; fbRefreshToken = refreshTok; fbUserId = uid;
 
-    loginAs({ ...userData, uid, id: uid });
-    return true;
-  } catch(e) { clearSession(); return false; }
+  // Try refreshing the token, retrying a couple of times on transient/network failures
+  // before giving up. We only ever clear the saved session on a genuinely invalid token —
+  // never because of a temporary network blip.
+  let result = { ok: false, reason: 'network' };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    result = await refreshToken();
+    if (result.ok || result.reason === 'invalid') break;
+    await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+  }
+
+  if (!result.ok) {
+    if (result.reason === 'invalid') { clearSession(); return false; }
+    // Transient/network failure: keep the session in storage so the next reload can
+    // retry, but we can't get the user in right now.
+    return false;
+  }
+
+  // Update the stored session with the freshly refreshed tokens.
+  saveSession(uid, fbIdToken, fbRefreshToken);
+
+  let userData;
+  try { userData = await fsGet('users', uid); }
+  catch(e) {
+    // Network/Firestore hiccup fetching the profile — keep the session for next time.
+    return false;
+  }
+  if (!userData) {
+    // Could not find the user doc. This is ambiguous (deleted account vs a Firestore
+    // read glitch), so don't nuke the session on it — just fail this restore attempt.
+    return false;
+  }
+  if (userData.status === 'banned') { clearSession(); return false; }
+
+  try { await loadAllData(); } catch(e) { /* non-fatal, app can still function */ }
+
+  loginAs({ ...userData, uid, id: uid });
+  return true;
 }
 
 async function ensureFounderExists() {
