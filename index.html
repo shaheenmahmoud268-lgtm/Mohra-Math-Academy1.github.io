@@ -365,17 +365,6 @@ window.addEventListener('load', async function() {
   // Apply current theme filter to logos immediately
   try { applyLogoFilter(localStorage.getItem('mohra_theme')||'navy'); } catch(e) {}
   buildParticles();
-  // Restore remember-me checkbox state
-  try {
-    const pref = localStorage.getItem('mohra_remember');
-    const cb = document.getElementById('remember-me-check');
-    if (cb && pref !== null) cb.checked = pref === '1';
-    if (cb) cb.addEventListener('change', () => {
-      try { localStorage.setItem('mohra_remember', cb.checked ? '1' : '0'); } catch(e) {}
-      // Note: session now always persists in localStorage until explicit logout,
-      // regardless of this checkbox's state.
-    });
-  } catch(e) {}
   setAuthLoading(true);
   const resumed = await restoreSession();
   if (!resumed) showAuthScreen();
@@ -737,10 +726,6 @@ tr:hover td { background:var(--bg); }
 .announcement p { font-size:0.83rem; color:var(--subtext); }
 .announcement .ann-date { font-size:0.75rem; color:var(--sky); margin-top:6px; }
 
-/* REMEMBER ME */
-#remember-me { flex-shrink:0; }
-label[for="remember-me"]:hover { color:var(--navy); }
-
 /* SCROLLBAR */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-track { background:transparent; }
@@ -996,11 +981,7 @@ body.dark-mode .at-risk-card { background:#2a1a1a; }
       <div class="error-msg" id="login-error"></div>
       <div class="field"><label>Email Address</label><input type="email" id="login-email" placeholder="Enter your email" onkeydown="if(event.key==='Enter')doFirebaseLogin()"/></div>
       <div class="field"><label>Password</label><div style="position:relative"><input type="password" id="login-pass" placeholder="Enter password" style="width:100%;padding-right:46px" onkeydown="if(event.key==='Enter')doFirebaseLogin()"/><button type="button" onclick="togglePass('login-pass',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.15rem;line-height:1;padding:0;color:var(--subtext)">👁</button></div></div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <label id="remember-me" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--subtext);user-select:none">
-          <input type="checkbox" id="remember-me-check" style="width:15px;height:15px;accent-color:var(--navy);cursor:pointer" checked/>
-          Remember me
-        </label>
+      <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:4px">
         <button onclick="doForgotPassword()" style="background:none;border:none;color:var(--sky);font-size:0.85rem;cursor:pointer;text-decoration:underline;font-family:inherit;padding:0">Forgot password?</button>
       </div>
       <button class="btn btn-primary" id="login-btn" onclick="doFirebaseLogin()">Sign In →</button>
