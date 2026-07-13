@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- BUILD MARKER: SESSION-FIX-V4-DEBUG -->
+<!-- BUILD MARKER: SESSION-FIX-V5-ALERT -->
 <html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8"/>
@@ -223,25 +223,11 @@ function saveSession(uid, idToken, refreshTok) {
   }
 }
 
-// On-screen diagnostic badge — shows session status directly on the page,
-// no DevTools needed. Remove this block once everything is confirmed working.
 function __sessionDebug(msg) {
-  try {
-    console.log('[session-debug]', msg);
-    let el = document.getElementById('__session_debug_badge');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = '__session_debug_badge';
-      el.style.cssText = 'position:fixed;bottom:8px;right:8px;max-width:92vw;z-index:999999;' +
-        'background:#111;color:#0f0;font:11px/1.4 monospace;padding:8px 10px;border-radius:6px;' +
-        'box-shadow:0 2px 10px rgba(0,0,0,.5);white-space:pre-wrap;opacity:0.95;';
-      (document.body || document.documentElement).appendChild(el);
-    }
-    const time = new Date().toLocaleTimeString();
-    el.textContent = '[' + time + '] ' + msg + '\n' + (el.textContent || '').split('\n').slice(0, 8).join('\n');
-  } catch(e) {}
+  try { console.log('[session-debug]', msg); } catch(e) {}
 }
 window.__sessionDebug = __sessionDebug;
+window.__sessionDebugAlert = function(msg) { try { alert('[SESSION DEBUG]\n' + msg); } catch(e) {} };
 
 
 function clearSession() {
@@ -251,6 +237,7 @@ function clearSession() {
 
 async function restoreSession() {
   const s = localStorage.getItem('mohra_session') || sessionStorage.getItem('mohra_session');
+  window.__sessionDebugAlert('PAGE JUST LOADED.\nlocalStorage mohra_session =\n' + (s === null ? 'NULL (nothing saved!)' : s));
   if (!s) { __sessionDebug('restoreSession: no saved session found in storage.'); return false; }
   __sessionDebug('restoreSession: found saved session, attempting restore...');
   let parsed;
@@ -378,6 +365,7 @@ window.doFirebaseLogin = async function() {
     fbRefreshToken = data.refreshToken;
     fbUserId = data.localId;
     saveSession(fbUserId, fbIdToken, fbRefreshToken);
+    window.__sessionDebugAlert('LOGIN JUST HAPPENED.\nlocalStorage now contains:\n' + localStorage.getItem('mohra_session'));
     let userData = await fsGet('users', fbUserId);
     // First-ever login for founder — create their Firestore profile automatically
     if (!userData && email === 'hazemmohra986@gmail.com') {
