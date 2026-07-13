@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- BUILD MARKER: SESSION-FIX-V5-ALERT -->
+<!-- BUILD MARKER: SESSION-FIX-V6-FINAL -->
 <html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8"/>
@@ -211,7 +211,7 @@ function setAuthLoading(on) {
   if (btn) { btn.disabled = on; btn.textContent = on ? 'Signing in...' : 'Sign In →'; }
 }
 
-function saveSession(uid, idToken, refreshTok) {
+function saveLoginSession(uid, idToken, refreshTok) {
   try {
     // Always persist across browser restarts/reloads until explicit logout.
     const payload = JSON.stringify({ uid, idToken, refreshTok });
@@ -237,7 +237,6 @@ function clearSession() {
 
 async function restoreSession() {
   const s = localStorage.getItem('mohra_session') || sessionStorage.getItem('mohra_session');
-  window.__sessionDebugAlert('PAGE JUST LOADED.\nlocalStorage mohra_session =\n' + (s === null ? 'NULL (nothing saved!)' : s));
   if (!s) { __sessionDebug('restoreSession: no saved session found in storage.'); return false; }
   __sessionDebug('restoreSession: found saved session, attempting restore...');
   let parsed;
@@ -267,7 +266,7 @@ async function restoreSession() {
       __sessionDebug('restoreSession: refresh failed due to network, KEEPING session for next reload.');
       return false;
     }
-    saveSession(uid, fbIdToken, fbRefreshToken);
+    saveLoginSession(uid, fbIdToken, fbRefreshToken);
     userDoc = await fsGetWithStatus('users', uid);
     __sessionDebug('restoreSession: fsGet after refresh -> ' + userDoc.kind);
   } else if (userDoc.kind === 'network') {
@@ -364,8 +363,7 @@ window.doFirebaseLogin = async function() {
     fbIdToken = data.idToken;
     fbRefreshToken = data.refreshToken;
     fbUserId = data.localId;
-    saveSession(fbUserId, fbIdToken, fbRefreshToken);
-    window.__sessionDebugAlert('LOGIN JUST HAPPENED.\nlocalStorage now contains:\n' + localStorage.getItem('mohra_session'));
+    saveLoginSession(fbUserId, fbIdToken, fbRefreshToken);
     let userData = await fsGet('users', fbUserId);
     // First-ever login for founder — create their Firestore profile automatically
     if (!userData && email === 'hazemmohra986@gmail.com') {
@@ -8845,3 +8843,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
 </body>
 </html>
+
+
