@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- BUILD MARKER: SESSION-FIX-V6-FINAL -->
+<!-- BUILD MARKER: SESSION-FIX-V7-FAST -->
 <html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8"/>
@@ -142,25 +142,22 @@ window._fbSaveNextId = async function() {
 
 async function loadAllData() {
   const cols = ['users','materials','recordings','announcements','classrooms','homework','grades','questions','notes','schedule','attendance','shoutouts','challenges','auditlog','liveQuiz','hwsubmissions','studentnotes','dmmessages','weeklychallenge'];
-  for (const col of cols) {
-    try { state[col] = await fsList(col); }
-    catch(e) { state[col] = state[col] || []; }
-  }
+  // Fetch all collections in parallel instead of one-at-a-time — cuts load time
+  // from N sequential round-trips down to roughly the time of the slowest single request.
+  const results = await Promise.all(cols.map(col =>
+    fsList(col).catch(e => state[col] || [])
+  ));
+  cols.forEach((col, i) => { state[col] = results[i]; });
   state.announcements.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
-  try {
-    const meta = await fsGet('meta', 'counters');
-    if (meta && meta.nextId) state.nextId = meta.nextId;
-  } catch(e) {}
-  // Load XP/gamification data per user (stored as single doc)
-  try {
-    const xpDoc = await fsGet('meta', 'xpdata');
-    state.xpdata = xpDoc || {};
-  } catch(e) { state.xpdata = {}; }
-  // Load online presence
-  try {
-    const presDoc = await fsGet('meta', 'presence');
-    state.presence = presDoc || {};
-  } catch(e) { state.presence = {}; }
+  // These three are independent of the above too, so run them alongside, not after.
+  const [meta, xpDoc, presDoc] = await Promise.all([
+    fsGet('meta', 'counters').catch(() => null),
+    fsGet('meta', 'xpdata').catch(() => null),
+    fsGet('meta', 'presence').catch(() => null)
+  ]);
+  if (meta && meta.nextId) state.nextId = meta.nextId;
+  state.xpdata = xpDoc || {};
+  state.presence = presDoc || {};
 }
 
 window._fbLoadAllData = loadAllData;
