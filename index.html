@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- BUILD MARKER: SESSION-FIX-V3 -->
+<!-- BUILD MARKER: SESSION-FIX-V4-DEBUG -->
 <html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8"/>
@@ -217,8 +217,32 @@ function saveSession(uid, idToken, refreshTok) {
     const payload = JSON.stringify({ uid, idToken, refreshTok });
     localStorage.setItem('mohra_session', payload);
     sessionStorage.removeItem('mohra_session');
+    __sessionDebug('saveSession: wrote to localStorage OK for uid=' + uid);
+  } catch(e) {
+    __sessionDebug('saveSession: FAILED to write — ' + (e && e.message ? e.message : e));
+  }
+}
+
+// On-screen diagnostic badge — shows session status directly on the page,
+// no DevTools needed. Remove this block once everything is confirmed working.
+function __sessionDebug(msg) {
+  try {
+    console.log('[session-debug]', msg);
+    let el = document.getElementById('__session_debug_badge');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = '__session_debug_badge';
+      el.style.cssText = 'position:fixed;bottom:8px;right:8px;max-width:92vw;z-index:999999;' +
+        'background:#111;color:#0f0;font:11px/1.4 monospace;padding:8px 10px;border-radius:6px;' +
+        'box-shadow:0 2px 10px rgba(0,0,0,.5);white-space:pre-wrap;opacity:0.95;';
+      (document.body || document.documentElement).appendChild(el);
+    }
+    const time = new Date().toLocaleTimeString();
+    el.textContent = '[' + time + '] ' + msg + '\n' + (el.textContent || '').split('\n').slice(0, 8).join('\n');
   } catch(e) {}
 }
+window.__sessionDebug = __sessionDebug;
+
 
 function clearSession() {
   try { localStorage.removeItem('mohra_session'); } catch(e) {}
@@ -227,17 +251,19 @@ function clearSession() {
 
 async function restoreSession() {
   const s = localStorage.getItem('mohra_session') || sessionStorage.getItem('mohra_session');
-  if (!s) return false;
+  if (!s) { __sessionDebug('restoreSession: no saved session found in storage.'); return false; }
+  __sessionDebug('restoreSession: found saved session, attempting restore...');
   let parsed;
-  try { parsed = JSON.parse(s); } catch(e) { clearSession(); return false; }
+  try { parsed = JSON.parse(s); } catch(e) { __sessionDebug('restoreSession: saved session was corrupt JSON, clearing.'); clearSession(); return false; }
   const { uid, idToken, refreshTok } = parsed;
-  if (!uid || !refreshTok) { clearSession(); return false; }
+  if (!uid || !refreshTok) { __sessionDebug('restoreSession: saved session missing uid/refreshTok, clearing.'); clearSession(); return false; }
   fbIdToken = idToken; fbRefreshToken = refreshTok; fbUserId = uid;
 
   // Step 1: try the existing idToken as-is (it's valid for ~1 hour, so on most reloads
   // we don't need to refresh at all, and don't depend on the refresh-token endpoint
   // being reachable/enabled).
   let userDoc = await fsGetWithStatus('users', uid);
+  __sessionDebug('restoreSession: initial fsGet with existing token -> ' + userDoc.kind);
 
   // Step 2: only if the existing token is actually rejected (expired/invalid) do we
   // attempt a refresh. Network hiccups here are retried, never treated as a logout.
@@ -245,43 +271,50 @@ async function restoreSession() {
     let result = { ok: false, reason: 'network' };
     for (let attempt = 0; attempt < 3; attempt++) {
       result = await refreshToken();
+      __sessionDebug('restoreSession: refresh attempt ' + (attempt+1) + ' -> ' + (result.ok ? 'ok' : result.reason));
       if (result.ok || result.reason === 'invalid') break;
       await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
     }
     if (!result.ok) {
-      if (result.reason === 'invalid') { clearSession(); return false; }
-      // Transient/network failure refreshing — keep the session for next time.
+      if (result.reason === 'invalid') { __sessionDebug('restoreSession: refresh token genuinely invalid, clearing session.'); clearSession(); return false; }
+      __sessionDebug('restoreSession: refresh failed due to network, KEEPING session for next reload.');
       return false;
     }
     saveSession(uid, fbIdToken, fbRefreshToken);
     userDoc = await fsGetWithStatus('users', uid);
+    __sessionDebug('restoreSession: fsGet after refresh -> ' + userDoc.kind);
   } else if (userDoc.kind === 'network') {
     // Firestore hiccup on the very first try — give it a couple more attempts with
     // the same (still-unexpired) token before giving up for this reload.
     for (let attempt = 0; attempt < 2 && userDoc.kind === 'network'; attempt++) {
       await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
       userDoc = await fsGetWithStatus('users', uid);
+      __sessionDebug('restoreSession: retry fsGet ' + (attempt+1) + ' -> ' + userDoc.kind);
     }
   }
 
   if (userDoc.kind === 'unauthorized') {
     // Still unauthorized even after a successful refresh — something's genuinely wrong
     // with this account's access, not just an expired token.
+    __sessionDebug('restoreSession: still unauthorized after refresh, clearing session.');
     clearSession();
     return false;
   }
   if (userDoc.kind === 'network') {
     // Could not reach Firestore after retries — keep the session for the next reload.
+    __sessionDebug('restoreSession: Firestore unreachable after retries, KEEPING session for next reload.');
     return false;
   }
 
   const userData = userDoc.data;
   if (!userData) {
     // No such user doc. Ambiguous (deleted vs. glitch) — don't destroy the session on it.
+    __sessionDebug('restoreSession: user doc came back empty, KEEPING session, not logging out.');
     return false;
   }
-  if (userData.status === 'banned') { clearSession(); return false; }
+  if (userData.status === 'banned') { __sessionDebug('restoreSession: account is banned, clearing session.'); clearSession(); return false; }
 
+  __sessionDebug('restoreSession: SUCCESS, logging user in.');
   try { await loadAllData(); } catch(e) { /* non-fatal, app can still function */ }
 
   loginAs({ ...userData, uid, id: uid });
@@ -434,6 +467,7 @@ window.doCreateFirebaseAccount = async function() {
 
 // ── Boot ─────────────────────────────────────────
 window.addEventListener('load', async function() {
+  __sessionDebug('boot: page load event fired, starting restore.');
   document.getElementById('auth-logo-img').src  = LOGO_B64;
   document.getElementById('header-logo-img').src = LOGO_B64;
   document.getElementById('hero-logo-img').src   = LOGO_B64;
@@ -441,8 +475,13 @@ window.addEventListener('load', async function() {
   try { applyLogoFilter(localStorage.getItem('mohra_theme')||'navy'); } catch(e) {}
   buildParticles();
   setAuthLoading(true);
-  const resumed = await restoreSession();
-  if (!resumed) showAuthScreen();
+  try {
+    const resumed = await restoreSession();
+    if (!resumed) { __sessionDebug('boot: restoreSession returned false, showing login screen.'); showAuthScreen(); }
+  } catch(e) {
+    __sessionDebug('boot: restoreSession THREW an exception — ' + (e && e.message ? e.message : e));
+    showAuthScreen();
+  }
 });
 </script>
 <style>
